@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { StockResult, Signal } from '@/types/stock';
 import { StockInfo } from '@/app/api/stock-info/route';
 import type { NewsItem } from '@/app/api/news/route';
@@ -44,9 +45,18 @@ interface Suggestion {
   name: string;
 }
 
+interface AgentAction {
+  type: 'search' | 'source_added' | 'note_created';
+  query?: string;
+  count?: number;
+  url?: string;
+  preview?: string;
+}
+
 interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
+  actions?: AgentAction[];
 }
 
 // ─── Shared autocomplete hook ─────────────────────────────────────────────────
@@ -150,7 +160,7 @@ export default function Home() {
       <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-black text-sm select-none">P</div>
-          <span className="font-bold text-base tracking-tight">PASK Stocks</span>
+          <span className="font-bold text-base tracking-tight">PASK STOCKS</span>
           <nav className="ml-auto flex gap-1">
             {(Object.keys(TAB_LABELS) as Tab[]).map((t) => (
               <button
@@ -161,6 +171,12 @@ export default function Home() {
                 {TAB_LABELS[t]}
               </button>
             ))}
+            <Link
+              href="/docs"
+              className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors"
+            >
+              Docs
+            </Link>
           </nav>
         </div>
       </header>
@@ -396,6 +412,25 @@ function ChatTab() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const chatInputRef = useRef<HTMLInputElement>(null);
 
+  // Notebooks
+  const [notebooks, setNotebooks] = useState<{ id: string; title: string; source_count?: number }[]>([]);
+  const [notebooksLoading, setNotebooksLoading] = useState(true);
+  const [selectedNotebook, setSelectedNotebook] = useState<{ id: string; title: string } | null>(null);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/api/notebooks')
+      .then(r => r.json())
+      .then(d => {
+        const nbs = d.notebooks ?? [];
+        setNotebooks(nbs);
+        // Auto-select "PASK stocks" if present, otherwise first
+        const pask = nbs.find((n: { id: string; title: string }) => n.title === 'PASK stocks') ?? nbs[0] ?? null;
+        setSelectedNotebook(pask);
+      })
+      .catch(() => {})
+      .finally(() => setNotebooksLoading(false));
+  }, []);
+
   // Scroll on new messages or while typing
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -412,7 +447,8 @@ function ChatTab() {
       if (i >= typingFull.length) {
         clearInterval(typingRef.current!);
         setIsTyping(false);
-        setMessages(prev => [...prev, { role: 'assistant', content: typingFull }]);
+        setMessages(prev => [...prev, { role: 'assistant', content: typingFull, actions: pendingActions }]);
+        setPendingActions([]);
         setTypingFull('');
         setTypingDisplayed('');
       }
@@ -454,23 +490,32 @@ function ChatTab() {
     }
   };
 
-  const sendMessage = async () => {
-    const q = input.trim();
+  const [pendingActions, setPendingActions] = useState<AgentAction[]>([]);
+
+  const sendMessage = async (overrideText?: string) => {
+    const q = (overrideText ?? input).trim();
     if (!q || chatLoading || isTyping) return;
 
-    setMessages(prev => [...prev, { role: 'user', content: q }]);
-    setInput('');
+    const newMessages = [...messages, { role: 'user' as const, content: q }];
+    setMessages(newMessages);
+    if (!overrideText) setInput('');
     setChatLoading(true);
+    setPendingActions([]);
+
+    // Send only user/assistant messages (no actions metadata) as history
+    const history = messages.map(m => ({ role: m.role, content: m.content }));
 
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockInfo, question: q }),
+        body: JSON.stringify({ stockInfo, question: q, history, notebook_id: selectedNotebook?.id ?? null }),
       });
       const data = await res.json();
       const answer = data.answer ?? data.error ?? 'Sin respuesta.';
+      const actions: AgentAction[] = data.actions ?? [];
       setChatLoading(false);
+      setPendingActions(actions);
       setTypingFull(answer);
       setIsTyping(true);
     } catch {
@@ -511,6 +556,33 @@ function ChatTab() {
           </div>
         </div>
       )}
+
+      {/* Notebook selector */}
+      <div className="flex items-center gap-3">
+        <span className="text-gray-500 text-xs font-medium uppercase tracking-wider shrink-0">Cuaderno</span>
+        {notebooksLoading ? (
+          <div className="h-8 w-48 bg-gray-800 rounded-lg animate-pulse" />
+        ) : notebooks.length === 0 ? (
+          <span className="text-gray-600 text-xs">Backend no disponible</span>
+        ) : (
+          <select
+            value={selectedNotebook?.id ?? ''}
+            disabled={messages.length > 0}
+            onChange={e => {
+              const nb = notebooks.find(n => n.id === e.target.value) ?? null;
+              setSelectedNotebook(nb);
+            }}
+            className="bg-gray-900 border border-gray-700 text-gray-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:border-blue-500 transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+            title={messages.length > 0 ? 'Limpia la conversación para cambiar de cuaderno' : ''}
+          >
+            {notebooks.map(nb => (
+              <option key={nb.id} value={nb.id}>
+                📒 {nb.title}{nb.source_count != null ? ` (${nb.source_count})` : ''}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
 
       {/* Stock selector */}
       <div className="relative">
@@ -578,6 +650,17 @@ function ChatTab() {
                     <p className="text-blue-400 text-xs mb-2 font-semibold uppercase tracking-wider">NotebookLM</p>
                   )}
                   {m.role === 'assistant' ? <FormattedMessage content={m.content} /> : m.content}
+                  {m.role === 'assistant' && m.actions && m.actions.length > 0 && (
+                    <div className="mt-3 pt-2 border-t border-gray-700 flex flex-col gap-1">
+                      {m.actions.map((a, i) => (
+                        <span key={i} className="text-xs text-gray-500 flex items-center gap-1.5">
+                          {a.type === 'search' && <><span>🔍</span><span>Búsqueda: &quot;{a.query}&quot; · {a.count} resultados</span></>}
+                          {a.type === 'source_added' && <><span>📎</span><span className="truncate">Fuente añadida: {a.url}</span></>}
+                          {a.type === 'note_created' && <><span>📝</span><span>Nota creada: {a.preview}…</span></>}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             ))
@@ -585,7 +668,7 @@ function ChatTab() {
           {chatLoading && (
             <div className="flex justify-start">
               <div className="bg-gray-800 rounded-2xl rounded-bl-sm px-4 py-3">
-                <p className="text-blue-400 text-xs mb-2 font-semibold uppercase tracking-wider">NotebookLM</p>
+                <p className="text-blue-400 text-xs mb-2 font-semibold uppercase tracking-wider">NOTEBOOKLM</p>
                 <div className="flex gap-1 items-center h-4">
                   <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:0ms]" />
                   <span className="w-2 h-2 bg-gray-500 rounded-full animate-bounce [animation-delay:150ms]" />
@@ -618,7 +701,7 @@ function ChatTab() {
             className="flex-1 bg-gray-900 border border-gray-700 rounded-xl px-4 py-3 text-sm placeholder:text-gray-600 focus:outline-none focus:border-blue-500 transition-colors disabled:opacity-40"
           />
           <button
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             disabled={!selectedStock || !input.trim() || chatLoading || isTyping}
             className="bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed px-5 py-3 rounded-xl font-semibold text-sm transition-colors whitespace-nowrap"
           >
@@ -634,6 +717,59 @@ function ChatTab() {
             Limpiar conversación
           </button>
         )}
+
+        {/* Quick actions */}
+        <div className="border-t border-gray-800/60 pt-3 space-y-3">
+          {/* Comandos financieros */}
+          <div className="space-y-1.5">
+            <p className="text-gray-500 text-[11px] uppercase tracking-wider font-medium">Análisis financiero</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { icon: '📄', label: '/one-pager',   desc: 'Ficha resumen profesional',    cmd: '/one-pager' },
+                { icon: '💰', label: '/dcf',         desc: 'Modelo DCF institucional',     cmd: '/dcf' },
+                { icon: '📈', label: '/earnings',    desc: 'Análisis resultados trimestrales', cmd: '/earnings' },
+                { icon: '⚖️', label: '/comps',       desc: 'Comparables de sector',        cmd: '/comps' },
+                { icon: '🏆', label: '/competitive', desc: 'Análisis competitivo + moat',  cmd: '/competitive' },
+                { icon: '🔎', label: '/screen',      desc: 'Screening de ideas',           cmd: '/screen' },
+              ].map(({ icon, label, desc, cmd }) => (
+                <button
+                  key={cmd}
+                  disabled={!selectedStock}
+                  onClick={() => sendMessage(cmd)}
+                  title={desc}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-950/50 hover:bg-blue-900/50 border border-blue-800/50 hover:border-blue-600/60 text-blue-300 hover:text-blue-100 text-xs font-mono transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <span>{icon}</span>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Acciones generales */}
+          <div className="space-y-1.5">
+            <p className="text-gray-600 text-[11px] uppercase tracking-wider font-medium">Otras acciones</p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { icon: '🔍', label: 'Buscar noticias sobre una empresa',   prompt: selectedStock ? `Busca noticias recientes sobre ${selectedStock.ticker}` : 'Busca noticias recientes sobre Apple' },
+                { icon: '📎', label: 'Añadir un enlace como fuente',        prompt: 'Añade este enlace como fuente: ' },
+                { icon: '🌐', label: 'Buscar y guardar fuentes relevantes', prompt: selectedStock ? `Busca artículos relevantes sobre ${selectedStock.ticker} y añade los mejores como fuentes` : 'Busca artículos sobre el mercado y añade los mejores como fuentes' },
+                { icon: '📝', label: 'Crear una nota',                      prompt: 'Crea una nota con el siguiente contenido: ' },
+                { icon: '📰', label: 'Resumir el mercado hoy',              prompt: 'Busca información sobre el estado del mercado hoy y hazme un resumen' },
+              ].map(({ icon, label, prompt }) => (
+                <button
+                  key={label}
+                  disabled={!selectedStock && prompt.startsWith('Selecciona')}
+                  onClick={() => { setInput(prompt); setTimeout(() => chatInputRef.current?.focus(), 50); }}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-gray-800/60 hover:bg-gray-700/60 border border-gray-700/50 hover:border-gray-600 text-gray-400 hover:text-gray-200 text-xs transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  <span>{icon}</span>
+                  <span>{label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -708,109 +844,270 @@ const Cursor = () => (
   <span className="inline-block w-0.5 h-[1em] bg-blue-400 ml-0.5 animate-pulse align-text-bottom" />
 );
 
+// ─── Inline renderer ──────────────────────────────────────────────────────────
+
 function renderInline(text: string, appendCursor?: boolean): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  const nodes = parts.map((part, i) =>
-    /^\*\*[^*]+\*\*$/.test(part)
-      ? <strong key={i} className="text-white font-semibold">{part.slice(2, -2)}</strong>
-      : part
-  );
+  // Order matters: longer/more specific patterns first
+  const parts = text.split(/(~~[^~]+~~|__[^_]+__|_[^_\n]+_|\*\*[^*]+\*\*|\*[^*\n]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\)|https?:\/\/[^\s)>]+)/g);
+  const nodes: React.ReactNode[] = parts.map((part, i) => {
+    if (/^~~[^~]+~~$/.test(part))
+      return <s key={i} className="text-gray-500">{part.slice(2, -2)}</s>;
+    if (/^__[^_]+__$/.test(part))
+      return <u key={i} className="underline underline-offset-2 decoration-gray-400">{part.slice(2, -2)}</u>;
+    if (/^_[^_]+_$/.test(part))
+      return <em key={i} className="text-gray-300 italic">{part.slice(1, -1)}</em>;
+    if (/^\*\*[^*]+\*\*$/.test(part))
+      return <strong key={i} className="text-white font-semibold">{part.slice(2, -2)}</strong>;
+    if (/^\*[^*]+\*$/.test(part))
+      return <em key={i} className="text-gray-300 italic">{part.slice(1, -1)}</em>;
+    if (/^`[^`]+`$/.test(part))
+      return <code key={i} className="bg-gray-700/80 text-blue-300 px-1.5 py-0.5 rounded text-[11px] font-mono">{part.slice(1, -1)}</code>;
+    const mdLink = part.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+    if (mdLink)
+      return <a key={i} href={mdLink[2]} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2">{mdLink[1]}</a>;
+    if (/^https?:\/\//.test(part)) {
+      const label = part.replace(/^https?:\/\/(www\.)?/, '').slice(0, 45) + (part.length > 55 ? '…' : '');
+      return <a key={i} href={part} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline underline-offset-2 break-all text-[11px]">{label}</a>;
+    }
+    return part;
+  });
   if (appendCursor) nodes.push(<Cursor key="cursor" />);
   return nodes;
 }
 
+// ─── Block parser ─────────────────────────────────────────────────────────────
+
+type MsgSegment =
+  | { type: 'h1' | 'h2' | 'h3'; text: string }
+  | { type: 'hr' }
+  | { type: 'bullet'; items: string[] }
+  | { type: 'numbered'; items: string[] }
+  | { type: 'table'; header: string[]; rows: string[][] }
+  | { type: 'blockquote'; lines: string[] }
+  | { type: 'paragraph'; lines: string[] };
+
+function parseSegments(content: string): MsgSegment[] {
+  const lines = content.split('\n');
+  const out: MsgSegment[] = [];
+  let i = 0;
+
+  const parseRow = (row: string) => row.split('|').slice(1, -1).map(c => c.trim());
+
+  while (i < lines.length) {
+    const raw = lines[i];
+    const t = raw.trim();
+
+    if (!t) { i++; continue; }
+
+    // Headings
+    const hm = t.match(/^(#{1,3})\s+(.+)/);
+    if (hm) {
+      const level = hm[1].length as 1 | 2 | 3;
+      out.push({ type: `h${level}` as 'h1' | 'h2' | 'h3', text: hm[2] });
+      i++; continue;
+    }
+
+    // Horizontal rule / separator lines (---, ===, ───, ═══)
+    if (/^[-=*_]{3,}$/.test(t) || /^[═─]{3,}/.test(t)) {
+      // Only add hr if previous segment wasn't already an hr
+      if (out.length === 0 || out[out.length - 1].type !== 'hr')
+        out.push({ type: 'hr' });
+      i++; continue;
+    }
+
+    // Table: current line has | and next line is a separator row
+    if (t.startsWith('|') && i + 1 < lines.length && /^\|[\s|:-]+\|/.test(lines[i + 1].trim())) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        tableLines.push(lines[i]);
+        i++;
+      }
+      const header = parseRow(tableLines[0]);
+      const rows = tableLines.slice(2).map(parseRow);
+      out.push({ type: 'table', header, rows });
+      continue;
+    }
+
+    // Blockquote
+    if (t.startsWith('>')) {
+      const bqLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('>')) {
+        bqLines.push(lines[i].trim().replace(/^>\s*/, ''));
+        i++;
+      }
+      out.push({ type: 'blockquote', lines: bqLines });
+      continue;
+    }
+
+    // Bullet list
+    if (/^[-*•]\s/.test(t)) {
+      const items: string[] = [];
+      while (i < lines.length && /^[-*•]\s/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^[-*•]\s+/, ''));
+        i++;
+      }
+      out.push({ type: 'bullet', items });
+      continue;
+    }
+
+    // Numbered list
+    if (/^\d+[.)]\s/.test(t)) {
+      const items: string[] = [];
+      while (i < lines.length && /^\d+[.)]\s/.test(lines[i].trim())) {
+        items.push(lines[i].trim().replace(/^\d+[.)]\s+/, ''));
+        i++;
+      }
+      out.push({ type: 'numbered', items });
+      continue;
+    }
+
+    // Paragraph — collect until a blank line or a special block starts
+    const paraLines: string[] = [];
+    while (i < lines.length) {
+      const l = lines[i].trim();
+      if (!l) { i++; break; }
+      if (/^#{1,3}\s/.test(l)) break;
+      if (/^[-=*_]{3,}$/.test(l) || /^[═─]{3,}/.test(l)) break;
+      if (l.startsWith('|') && /^\|[\s|:-]+\|/.test(lines[i + 1]?.trim() ?? '')) break;
+      if (l.startsWith('>')) break;
+      paraLines.push(lines[i]);
+      i++;
+    }
+    if (paraLines.length) out.push({ type: 'paragraph', lines: paraLines });
+  }
+
+  return out;
+}
+
+// ─── Segment renderer ─────────────────────────────────────────────────────────
+
+function renderSegment(seg: MsgSegment, key: number, isLast: boolean, cursor?: boolean): React.ReactNode {
+  switch (seg.type) {
+    case 'h1':
+      return <p key={key} className="text-white font-bold text-[15px] leading-snug mt-1">{renderInline(seg.text, cursor && isLast)}</p>;
+    case 'h2':
+      return <p key={key} className="text-white font-semibold text-sm leading-snug">{renderInline(seg.text, cursor && isLast)}</p>;
+    case 'h3':
+      return <p key={key} className="text-gray-300 font-semibold text-[13px] leading-snug">{renderInline(seg.text, cursor && isLast)}</p>;
+
+    case 'hr':
+      return <hr key={key} className="border-gray-700/60 my-0.5" />;
+
+    case 'table': {
+      return (
+        <div key={key} className="overflow-x-auto rounded-lg border border-gray-700/80 text-xs my-1">
+          <table className="w-full border-collapse min-w-max">
+            <thead>
+              <tr className="bg-gray-800/80">
+                {seg.header.map((h, ci) => (
+                  <th key={ci} className="px-3 py-2 text-left text-gray-200 font-semibold border-b border-gray-700 whitespace-nowrap">{renderInline(h)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {seg.rows.map((row, ri) => (
+                <tr key={ri} className={ri % 2 === 0 ? 'bg-gray-900/60' : 'bg-gray-800/30'}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} className="px-3 py-2 text-gray-300 border-b border-gray-800/40 align-top">{renderInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
+
+    case 'blockquote':
+      return (
+        <div key={key} className="border-l-2 border-blue-500/60 pl-3 py-0.5 space-y-0.5">
+          {seg.lines.map((l, li) => <p key={li} className="text-gray-400 text-xs italic">{renderInline(l)}</p>)}
+        </div>
+      );
+
+    case 'bullet':
+      return (
+        <ul key={key} className="space-y-1 pl-1">
+          {seg.items.map((item, li) => (
+            <li key={li} className="flex gap-2 min-w-0">
+              <span className="text-blue-400 mt-0.5 shrink-0 select-none">•</span>
+              <span className="min-w-0 break-words">{renderInline(item, cursor && isLast && li === seg.items.length - 1)}</span>
+            </li>
+          ))}
+        </ul>
+      );
+
+    case 'numbered':
+      return (
+        <ol key={key} className="space-y-1 pl-1">
+          {seg.items.map((item, li) => (
+            <li key={li} className="flex gap-2 min-w-0">
+              <span className="text-blue-400 shrink-0 tabular-nums font-mono text-[11px] mt-0.5">{li + 1}.</span>
+              <span className="min-w-0 break-words">{renderInline(item, cursor && isLast && li === seg.items.length - 1)}</span>
+            </li>
+          ))}
+        </ol>
+      );
+
+    case 'paragraph': {
+      const paraNodes = seg.lines.map((line, li) => {
+        const t = line.trim();
+        if (!t) return null;
+        const isLastLine = isLast && li === seg.lines.length - 1;
+        // Inline bullet within paragraph
+        if (/^[-*•]\s/.test(t)) {
+          return (
+            <div key={li} className="flex gap-2 min-w-0">
+              <span className="text-blue-400 mt-0.5 shrink-0 select-none">•</span>
+              <span className="min-w-0 break-words">{renderInline(t.replace(/^[-*•]\s+/, ''), cursor && isLastLine)}</span>
+            </div>
+          );
+        }
+        return <p key={li} className="break-words leading-relaxed">{renderInline(t, cursor && isLastLine)}</p>;
+      }).filter(Boolean);
+      return <div key={key} className="space-y-1">{paraNodes}</div>;
+    }
+  }
+}
+
+// ─── FormattedMessage ─────────────────────────────────────────────────────────
+
 function FormattedMessage({ content, cursor }: { content: string; cursor?: boolean }) {
-  const blocks = content.split(/\n{2,}/).filter(Boolean);
-
+  const segments = parseSegments(content);
   return (
-    <div className="space-y-3">
-      {blocks.map((block, bi) => {
-        const isLastBlock = bi === blocks.length - 1;
-        const lines = block.split('\n').filter(Boolean);
-
-        const isBulletList = lines.every(l => /^[-*•]\s/.test(l.trim()));
-        if (isBulletList) {
-          return (
-            <ul key={bi} className="space-y-1 pl-1">
-              {lines.map((line, li) => {
-                const isLast = isLastBlock && li === lines.length - 1;
-                return (
-                  <li key={li} className="flex gap-2">
-                    <span className="text-blue-400 mt-0.5 shrink-0">•</span>
-                    <span>{renderInline(line.replace(/^[-*•]\s+/, ''), cursor && isLast)}</span>
-                  </li>
-                );
-              })}
-            </ul>
-          );
-        }
-
-        const isNumberedList = lines.every(l => /^\d+[.)]\s/.test(l.trim()));
-        if (isNumberedList) {
-          return (
-            <ol key={bi} className="space-y-1 pl-1">
-              {lines.map((line, li) => {
-                const isLast = isLastBlock && li === lines.length - 1;
-                return (
-                  <li key={li} className="flex gap-2">
-                    <span className="text-blue-400 shrink-0 tabular-nums">{li + 1}.</span>
-                    <span>{renderInline(line.replace(/^\d+[.)]\s+/, ''), cursor && isLast)}</span>
-                  </li>
-                );
-              })}
-            </ol>
-          );
-        }
-
-        if (lines.length === 1 && /^#{1,3}\s/.test(lines[0])) {
-          const text = lines[0].replace(/^#{1,3}\s+/, '');
-          return (
-            <p key={bi} className="font-semibold text-white">
-              {renderInline(text, cursor && isLastBlock)}
-            </p>
-          );
-        }
-
-        return (
-          <div key={bi} className="space-y-1">
-            {lines.map((line, li) => {
-              const isLast = isLastBlock && li === lines.length - 1;
-              if (/^[-*•]\s/.test(line.trim())) {
-                return (
-                  <div key={li} className="flex gap-2">
-                    <span className="text-blue-400 mt-0.5 shrink-0">•</span>
-                    <span>{renderInline(line.replace(/^[-*•]\s+/, ''), cursor && isLast)}</span>
-                  </div>
-                );
-              }
-              return <p key={li}>{renderInline(line, cursor && isLast)}</p>;
-            })}
-          </div>
-        );
-      })}
+    <div className="space-y-2">
+      {segments.map((seg, i) => renderSegment(seg, i, i === segments.length - 1, cursor))}
     </div>
   );
 }
 
 // ─── News tab ─────────────────────────────────────────────────────────────────
 
-// Tipo que acepta tanto NewsItem original como EnhancedNewsItem
-type EnhancedNewsItem = NewsItem & {
-  fullContent?: string;
-  tickers?: string[];
-}
+// EnhancedNewsItem is imported from @/types/news
 
 function NewsTab() {
   const [news, setNews] = useState<EnhancedNewsItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyses, setAnalyses] = useState<Record<string, NewsAnalysis | 'loading' | 'error'>>({});
+  const [briefing, setBriefing] = useState<string | null>(null);
+  const [briefingLoading, setBriefingLoading] = useState(true);
+  const [briefingSources, setBriefingSources] = useState<number>(0);
 
   useEffect(() => {
+    // Load news and briefing in parallel
     fetch('/api/news-enhanced')
       .then(r => r.json())
       .then(d => setNews(d.news ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
+
+    fetch('/api/daily-briefing')
+      .then(r => r.json())
+      .then(d => {
+        if (d.briefing) { setBriefing(d.briefing); setBriefingSources(d.sourcesCount ?? 0); }
+      })
+      .catch(() => {})
+      .finally(() => setBriefingLoading(false));
   }, []);
 
   const analyze = async (item: EnhancedNewsItem) => {
@@ -856,6 +1153,29 @@ function NewsTab() {
           {loading ? 'Cargando…' : 'Actualizar'}
         </button>
       </div>
+
+      {/* Daily briefing */}
+      {briefingLoading ? (
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse space-y-3">
+          <div className="flex gap-2 items-center"><div className="h-3 bg-gray-800 rounded w-32"/><div className="h-3 bg-gray-800 rounded w-20"/></div>
+          <div className="h-3 bg-gray-800 rounded w-full"/>
+          <div className="h-3 bg-gray-800 rounded w-5/6"/>
+          <div className="h-3 bg-gray-800 rounded w-4/6"/>
+        </div>
+      ) : briefing && (
+        <div className="bg-gray-900 border border-blue-900/40 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-5 py-3 bg-blue-600/10 border-b border-blue-900/40">
+            <div className="flex items-center gap-2">
+              <span className="text-blue-400 text-sm">📊</span>
+              <span className="text-blue-400 text-xs font-semibold uppercase tracking-wider">Informe del mercado · Hoy</span>
+            </div>
+            <span className="text-gray-600 text-xs">{briefingSources} fuentes analizadas</span>
+          </div>
+          <div className="p-5">
+            <FormattedMessage content={briefing} />
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

@@ -5,7 +5,7 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "PASK Stocks — Análisis técnico",
+  title: "PASK STOCKS — Análisis técnico",
   description: "Análisis técnico de acciones: MA50, MA200, RSI y señal Buy/Sell/Hold",
 };
 

@@ -11,6 +11,7 @@ const CACHE_PATH = path.join(process.cwd(), '.news-cache.json');
 interface Cache {
   date: string; // 'YYYY-MM-DD'
   news: EnhancedNewsItem[];
+  sourcesSynced?: boolean;
 }
 
 function todayStr() {
@@ -28,11 +29,12 @@ function readCache(): Cache | null {
   }
 }
 
-function writeCache(news: EnhancedNewsItem[]) {
+function writeCache(news: EnhancedNewsItem[], sourcesSynced = false) {
   try {
-    fs.writeFileSync(CACHE_PATH, JSON.stringify({ date: todayStr(), news }), 'utf-8');
+    fs.writeFileSync(CACHE_PATH, JSON.stringify({ date: todayStr(), news, sourcesSynced }), 'utf-8');
   } catch { /* silent */ }
 }
+
 
 // ─── NewsAPI ──────────────────────────────────────────────────────────────────
 
@@ -149,7 +151,9 @@ export async function GET() {
 
   const news = unique.slice(0, 20);
 
-  writeCache(news);
+  // Write cache as synced immediately — sync is handled by daily-briefing route
+  writeCache(news, true);
 
   return NextResponse.json({ news });
 }
+

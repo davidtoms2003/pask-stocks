@@ -57,23 +57,30 @@ RESULTADOS FINANCIEROS
 - Crecimiento de ingresos (YoY): ${info.revenueGrowth ? `${(info.revenueGrowth * 100).toFixed(1)}%` : 'N/D'}`;
 }
 
+interface HistoryMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 export async function POST(request: NextRequest) {
-  const { stockInfo, question } = await request.json() as { stockInfo: StockInfo | null; question: string };
+  const { stockInfo, question, history = [], notebook_id = null } = await request.json() as {
+    stockInfo: StockInfo | null;
+    question: string;
+    history: HistoryMessage[];
+    notebook_id: string | null;
+  };
 
   if (!question?.trim()) {
     return NextResponse.json({ error: 'La pregunta no puede estar vacía.' }, { status: 400 });
   }
 
-  const contextBlock = stockInfo ? buildContext(stockInfo) : '';
-  const fullQuestion = stockInfo
-    ? `${contextBlock}\n\nPREGUNTA DEL USUARIO: ${question}`
-    : question;
+  const stock_context = stockInfo ? buildContext(stockInfo) : '';
 
   try {
-    const res = await fetch('http://localhost:8000/api/ask_pask_stocks', {
+    const res = await fetch('http://localhost:8000/api/chat_agent', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question: fullQuestion }),
+      body: JSON.stringify({ question, stock_context, history, notebook_id }),
     });
 
     if (!res.ok) {
@@ -82,7 +89,7 @@ export async function POST(request: NextRequest) {
     }
 
     const data = await res.json();
-    return NextResponse.json({ answer: data.answer });
+    return NextResponse.json({ answer: data.answer, actions: data.actions ?? [] });
   } catch {
     return NextResponse.json(
       { error: 'No se pudo conectar con el backend. ¿Está el servidor Python en marcha?' },

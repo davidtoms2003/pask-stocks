@@ -20,6 +20,7 @@
 .DS_Store
 *.pem
 .news-cache.json
+.briefing-cache.json
 __pycache__/
 *.pyc
 
