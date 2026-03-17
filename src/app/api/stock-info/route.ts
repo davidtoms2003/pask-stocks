@@ -46,7 +46,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const endDate = new Date();
-    const startDate = new Date();
+    endDate.setDate(endDate.getDate() - 1); // exclude today's incomplete candle when market is open
+    const startDate = new Date(endDate);
     startDate.setFullYear(startDate.getFullYear() - 2);
 
     const [historical, summary] = await Promise.all([

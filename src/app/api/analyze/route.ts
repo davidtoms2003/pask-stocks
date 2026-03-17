@@ -8,7 +8,8 @@ import { PriceDay } from '@/types/stock';
 
 async function fetchYahoo(ticker: string): Promise<PriceDay[]> {
   const endDate = new Date();
-  const startDate = new Date();
+  endDate.setDate(endDate.getDate() - 1); // exclude today's incomplete candle when market is open
+  const startDate = new Date(endDate);
   startDate.setFullYear(startDate.getFullYear() - 2); // 2 years → well over 200 trading days
 
   const result = await yahooFinance.historical(ticker, {
@@ -30,11 +31,13 @@ async function fetchYahoo(ticker: string): Promise<PriceDay[]> {
     seen.set(dateKey, row);
   }
 
-  return Array.from(seen.values()).map((row) => ({
-    date: row.date.toISOString().split('T')[0],
-    close: row.adjClose ?? row.close,
-    volume: row.volume ?? 0,
-  }));
+  return Array.from(seen.values())
+    .map((row) => ({
+      date: row.date.toISOString().split('T')[0],
+      close: row.adjClose ?? row.close,
+      volume: row.volume ?? 0,
+    }))
+    .filter((row): row is PriceDay => row.close !== null && row.close !== undefined);
 }
 
 export async function GET(req: NextRequest) {

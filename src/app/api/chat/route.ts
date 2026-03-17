@@ -81,6 +81,7 @@ export async function POST(request: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question, stock_context, history, notebook_id }),
+      signal: AbortSignal.timeout(300000), // 5 min — skills como /dcf pueden tardar
     });
 
     if (!res.ok) {

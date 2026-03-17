@@ -1081,6 +1081,134 @@ function FormattedMessage({ content, cursor }: { content: string; cursor?: boole
   );
 }
 
+// ─── Audio Player ─────────────────────────────────────────────────────────────
+
+function AudioPlayer({ src }: { src: string }) {
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const seekRef  = useRef<HTMLInputElement>(null);
+  const [playing, setPlaying] = useState(false);
+  const [current, setCurrent] = useState(0);
+  const [duration, setDuration] = useState(0);
+
+  const fmt = (s: number) =>
+    !s || !isFinite(s) ? '0:00' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+
+  useEffect(() => {
+    if (seekRef.current) {
+      seekRef.current.style.background = 'linear-gradient(to right, #a855f7 0%, #374151 0%)';
+    }
+  }, []);
+
+  const syncBar = (t: number, dur: number) => {
+    if (!seekRef.current) return;
+    seekRef.current.value = String(t);
+    const pct = dur > 0 ? (t / dur) * 100 : 0;
+    seekRef.current.style.background =
+      `linear-gradient(to right, #a855f7 ${pct}%, #374151 ${pct}%)`;
+  };
+
+  const toggle = async () => {
+    const a = audioRef.current;
+    if (!a) return;
+    if (!a.paused && !a.ended) {
+      a.pause();
+      return;
+    }
+    // If at the end, restart from the beginning
+    if (a.ended || (isFinite(a.duration) && a.currentTime >= a.duration - 0.1)) {
+      a.currentTime = 0;
+      setCurrent(0);
+      syncBar(0, a.duration);
+    }
+    await a.play().catch(console.error);
+  };
+
+  const skip = (secs: number) => {
+    const a = audioRef.current;
+    if (!a) return;
+    const dur = isFinite(a.duration) ? a.duration : 0;
+    const newTime = Math.min(Math.max(a.currentTime + secs, 0), dur > 0 ? dur - 0.1 : 0);
+    a.currentTime = newTime;
+    setCurrent(a.currentTime);
+    syncBar(a.currentTime, a.duration);
+  };
+
+  const onSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const a = audioRef.current;
+    if (!a) return;
+    const val = Number(e.target.value);
+    a.currentTime = val;
+    setCurrent(val);
+    syncBar(val, a.duration);
+  };
+
+  return (
+    <div className="space-y-2">
+      <audio
+        ref={audioRef}
+        src={src}
+        preload="metadata"
+        onTimeUpdate={e => {
+          const t = e.currentTarget.currentTime;
+          const d = e.currentTarget.duration;
+          setCurrent(t);
+          syncBar(t, d);
+        }}
+        onLoadedMetadata={e => {
+          const d = e.currentTarget.duration;
+          setDuration(d);
+          if (seekRef.current) seekRef.current.max = String(d);
+        }}
+        onPlay={() => setPlaying(true)}
+        onPause={() => setPlaying(false)}
+        onEnded={() => setPlaying(false)}
+      />
+
+      <input
+        ref={seekRef}
+        type="range"
+        min={0}
+        max={duration || 100}
+        step={0.1}
+        defaultValue={0}
+        onChange={onSeek}
+        className="audio-seek"
+      />
+
+      <div className="flex items-center justify-between text-[11px] text-gray-500 tabular-nums">
+        <span>{fmt(current)}</span>
+        <span>{fmt(duration)}</span>
+      </div>
+
+      <div className="flex items-center justify-center gap-8 pt-1">
+        <button onClick={() => skip(-15)} className="flex flex-col items-center gap-0.5 text-gray-500 hover:text-white transition-colors">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-3.85"/>
+          </svg>
+          <span className="text-[10px]">15s</span>
+        </button>
+
+        <button
+          onClick={toggle}
+          className="w-12 h-12 rounded-full bg-purple-600 hover:bg-purple-500 text-white flex items-center justify-center transition-colors shadow-lg shadow-purple-900/40"
+        >
+          {playing
+            ? <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
+            : <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style={{ marginLeft: 2 }}><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          }
+        </button>
+
+        <button onClick={() => skip(15)} className="flex flex-col items-center gap-0.5 text-gray-500 hover:text-white transition-colors">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-3.85"/>
+          </svg>
+          <span className="text-[10px]">15s</span>
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── News tab ─────────────────────────────────────────────────────────────────
 
 // EnhancedNewsItem is imported from @/types/news
@@ -1090,31 +1218,29 @@ function NewsTab() {
   const [loading, setLoading] = useState(true);
   const [analyses, setAnalyses] = useState<Record<string, NewsAnalysis | 'loading' | 'error'>>({});
   const [briefing, setBriefing] = useState<string | null>(null);
-  const [briefingLoading, setBriefingLoading] = useState(true);
-  const [briefingSources, setBriefingSources] = useState<number>(0);
+  const [briefingNews, setBriefingNews] = useState<EnhancedNewsItem[]>([]);
+  const [briefingAddedUrls, setBriefingAddedUrls] = useState<Set<string>>(new Set());
+  const [briefingFailedUrls, setBriefingFailedUrls] = useState<Set<string>>(new Set());
+  const [briefingTelegramUrls, setBriefingTelegramUrls] = useState<string[]>([]);
+  const [briefingLoading, setBriefingLoading] = useState(false);
+  const [briefingError, setBriefingError] = useState<string | null>(null);
+  const [podcastJobId, setPodcastJobId] = useState<string | null>(null);
+  const [podcastStatus, setPodcastStatus] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
+  const [podcastError, setPodcastError] = useState<string | null>(null);
+  const podcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    // Load news and briefing in parallel
     fetch('/api/news-enhanced')
       .then(r => r.json())
       .then(d => setNews(d.news ?? []))
       .catch(() => {})
       .finally(() => setLoading(false));
-
-    fetch('/api/daily-briefing')
-      .then(r => r.json())
-      .then(d => {
-        if (d.briefing) { setBriefing(d.briefing); setBriefingSources(d.sourcesCount ?? 0); }
-      })
-      .catch(() => {})
-      .finally(() => setBriefingLoading(false));
   }, []);
 
   const analyze = async (item: EnhancedNewsItem) => {
     if (analyses[item.id]) return;
     setAnalyses(prev => ({ ...prev, [item.id]: 'loading' }));
     try {
-      // Usamos la descripción completa si está disponible, sino usamos la descripción regular
       const descriptionToUse = item.fullContent || item.description;
       const res = await fetch('/api/news/analyze', {
         method: 'POST',
@@ -1128,14 +1254,60 @@ function NewsTab() {
     }
   };
 
+  const generatePodcast = async () => {
+    setPodcastStatus('generating');
+    setPodcastError(null);
+    try {
+      const res = await fetch('/api/podcast', { method: 'POST' });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error ?? 'Error desconocido');
+      setPodcastJobId(d.job_id);
+      // Start polling
+      podcastPollRef.current = setInterval(async () => {
+        try {
+          const sr = await fetch(`/api/podcast?job_id=${d.job_id}`);
+          const sd = await sr.json();
+          if (sd.status === 'ready') {
+            setPodcastStatus('ready');
+            if (podcastPollRef.current) clearInterval(podcastPollRef.current);
+          } else if (sd.status === 'failed') {
+            setPodcastStatus('failed');
+            setPodcastError(sd.error ?? 'Error generando el podcast');
+            if (podcastPollRef.current) clearInterval(podcastPollRef.current);
+          }
+        } catch { /* keep polling */ }
+      }, 6000);
+    } catch (e) {
+      setPodcastStatus('failed');
+      setPodcastError(e instanceof Error ? e.message : 'Error iniciando el podcast');
+    }
+  };
+
   const effectColors = { positivo: 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30', negativo: 'text-red-400 bg-red-500/10 border-red-500/30', mixto: 'text-amber-400 bg-amber-500/10 border-amber-500/30' };
   const effectLabels = { positivo: '↑ Positivo', negativo: '↓ Negativo', mixto: '~ Mixto' };
 
-  const refresh = () => {
-    setLoading(true);
-    setNews([]);
-    setAnalyses({});
-    fetch('/api/news-enhanced').then(r => r.json()).then(d => setNews(d.news ?? [])).catch(() => {}).finally(() => setLoading(false));
+  const generateBriefing = async () => {
+    setBriefingLoading(true);
+    setBriefingError(null);
+    setBriefing(null);
+    try {
+      const res = await fetch('/api/daily-briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ news }),
+      });
+      const d = await res.json();
+      if (!res.ok || d.error) throw new Error(d.error ?? 'Error desconocido');
+      setBriefing(d.briefing);
+      setBriefingNews(news);
+      setBriefingAddedUrls(new Set(d.addedUrls ?? []));
+      setBriefingFailedUrls(new Set(d.failedUrls ?? []));
+      setBriefingTelegramUrls(d.telegramUrls ?? []);
+    } catch (e) {
+      setBriefingError(e instanceof Error ? e.message : 'Error generando el resumen');
+    } finally {
+      setBriefingLoading(false);
+    }
   };
 
   return (
@@ -1146,7 +1318,16 @@ function NewsTab() {
           <p className="text-gray-400 text-sm mt-1">Mercados · Macro · Geopolítica</p>
         </div>
         <button
-          onClick={refresh}
+          onClick={() => {
+            setLoading(true);
+            setNews([]);
+            setAnalyses({});
+            fetch('/api/news-enhanced')
+              .then(r => r.json())
+              .then(d => setNews(d.news ?? []))
+              .catch(() => {})
+              .finally(() => setLoading(false));
+          }}
           disabled={loading}
           className="text-gray-500 hover:text-white text-sm border border-gray-800 hover:border-gray-600 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40"
         >
@@ -1154,25 +1335,147 @@ function NewsTab() {
         </button>
       </div>
 
-      {/* Daily briefing */}
-      {briefingLoading ? (
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5 animate-pulse space-y-3">
-          <div className="flex gap-2 items-center"><div className="h-3 bg-gray-800 rounded w-32"/><div className="h-3 bg-gray-800 rounded w-20"/></div>
-          <div className="h-3 bg-gray-800 rounded w-full"/>
-          <div className="h-3 bg-gray-800 rounded w-5/6"/>
-          <div className="h-3 bg-gray-800 rounded w-4/6"/>
+      {/* Generate briefing button */}
+      <button
+        onClick={generateBriefing}
+        disabled={briefingLoading || loading || news.length === 0}
+        className="w-full py-3 rounded-xl border border-blue-700/50 bg-blue-600/10 text-blue-400 font-semibold text-sm hover:bg-blue-600/20 hover:border-blue-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+      >
+        {briefingLoading ? (
+          <>
+            <span className="inline-block w-3 h-3 border border-blue-400 border-t-transparent rounded-full animate-spin mr-2 align-middle" />
+            Generando resumen…
+          </>
+        ) : 'GENERAR RESUMEN DEL DÍA'}
+      </button>
+
+      {/* Briefing error */}
+      {briefingError && (
+        <div className="text-sm px-4 py-2.5 rounded-xl border bg-red-500/10 border-red-500/30 text-red-400">
+          {briefingError}
         </div>
-      ) : briefing && (
+      )}
+
+      {/* Daily briefing result */}
+      {briefing && (
         <div className="bg-gray-900 border border-blue-900/40 rounded-2xl overflow-hidden">
-          <div className="flex items-center justify-between gap-3 px-5 py-3 bg-blue-600/10 border-b border-blue-900/40">
-            <div className="flex items-center gap-2">
-              <span className="text-blue-400 text-sm">📊</span>
-              <span className="text-blue-400 text-xs font-semibold uppercase tracking-wider">Informe del mercado · Hoy</span>
-            </div>
-            <span className="text-gray-600 text-xs">{briefingSources} fuentes analizadas</span>
+          <div className="flex items-center gap-2 px-5 py-3 bg-blue-600/10 border-b border-blue-900/40">
+            <span className="text-blue-400 text-sm">📊</span>
+            <span className="text-blue-400 text-xs font-semibold uppercase tracking-wider">
+              Resumen del día
+            </span>
           </div>
           <div className="p-5">
             <FormattedMessage content={briefing} />
+          </div>
+          {briefingNews.length > 0 && (
+            <div className="border-t border-blue-900/40 px-5 py-4">
+              <p className="text-gray-600 text-[11px] font-semibold uppercase tracking-wider mb-3">
+                {briefingAddedUrls.size} fuentes cargadas · {briefingFailedUrls.size} no disponibles · {briefingNews.length - briefingAddedUrls.size - briefingFailedUrls.size} omitidas
+                {briefingTelegramUrls.length > 0 && ` · ${briefingTelegramUrls.length} de Telegram`}
+              </p>
+              <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+                {briefingNews.map((item, i) => {
+                  const ok = briefingAddedUrls.has(item.url);
+                  const fail = briefingFailedUrls.has(item.url);
+                  return (
+                    <a
+                      key={i}
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-start gap-2 group"
+                    >
+                      <span className={`text-[11px] mt-0.5 shrink-0 ${ok ? 'text-emerald-500' : fail ? 'text-red-500' : 'text-gray-700'}`}>
+                        {ok ? '✓' : fail ? '✗' : '–'}
+                      </span>
+                      <div className="min-w-0">
+                        <span className={`text-xs line-clamp-1 leading-snug transition-colors ${fail ? 'text-gray-600 line-through' : 'text-gray-400 group-hover:text-blue-400'}`}>
+                          {item.title}
+                        </span>
+                        <span className="text-gray-700 text-[11px]"> · {item.source}</span>
+                        {fail && <span className="text-red-700 text-[11px]"> · no accesible</span>}
+                      </div>
+                    </a>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Telegram sources */}
+          {briefingTelegramUrls.length > 0 && (
+            <div className="border-t border-blue-900/40 px-5 py-4">
+                <p className="text-gray-600 text-[11px] font-semibold uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <span className="text-blue-500">✈</span> Telegram · @descifrandolaguerra
+                </p>
+                <div className="space-y-1">
+                  {briefingTelegramUrls.map((url, i) => {
+                    const ok = briefingAddedUrls.has(url);
+                    const fail = briefingFailedUrls.has(url);
+                    return (
+                      <a key={i} href={url} target="_blank" rel="noopener noreferrer" className="flex items-start gap-2 group">
+                        <span className={`text-[11px] mt-0.5 shrink-0 ${ok ? 'text-emerald-500' : fail ? 'text-red-500' : 'text-gray-600'}`}>
+                          {ok ? '✓' : fail ? '✗' : '–'}
+                        </span>
+                        <span className={`text-xs line-clamp-1 transition-colors ${fail ? 'text-gray-600 line-through' : 'text-gray-400 group-hover:text-blue-400'}`}>
+                          {url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 80)}
+                        </span>
+                      </a>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+        </div>
+      )}
+
+      {/* Podcast section — only shown after briefing is generated */}
+      {briefing && (
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl overflow-hidden">
+          <div className="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-800">
+            <div className="flex items-center gap-2">
+              <span className="text-purple-400 text-sm">🎙</span>
+              <span className="text-purple-400 text-xs font-semibold uppercase tracking-wider">Podcast del día</span>
+            </div>
+            {podcastStatus === 'idle' && (
+              <button
+                onClick={generatePodcast}
+                className="text-xs text-gray-400 hover:text-purple-400 border border-gray-700 hover:border-purple-700 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                Generar podcast
+              </button>
+            )}
+          </div>
+          <div className="px-5 py-4">
+            {podcastStatus === 'idle' && (
+              <p className="text-gray-600 text-sm">
+                Genera un podcast de ~10 min con dos presentadores de IA analizando las noticias del día.
+              </p>
+            )}
+            {podcastStatus === 'generating' && (
+              <div className="flex items-center gap-3 text-purple-400 text-sm">
+                <span className="w-4 h-4 border-2 border-purple-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                <span>Generando podcast… esto puede tardar entre 2 y 5 minutos</span>
+              </div>
+            )}
+            {podcastStatus === 'failed' && (
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-red-400 text-sm">{podcastError ?? 'Error generando el podcast'}</p>
+                <button
+                  onClick={() => { setPodcastStatus('idle'); setPodcastError(null); setPodcastJobId(null); }}
+                  className="text-xs text-gray-500 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-colors shrink-0"
+                >
+                  Reintentar
+                </button>
+              </div>
+            )}
+            {podcastStatus === 'ready' && podcastJobId && (
+              <div className="space-y-3">
+                <p className="text-gray-500 text-xs">Podcast generado con NotebookLM</p>
+                <AudioPlayer src={`http://localhost:8000/api/podcast_audio/${podcastJobId}`} />
+              </div>
+            )}
           </div>
         </div>
       )}

@@ -4,20 +4,21 @@ Daily market briefing service.
 Responsibilities:
 - Get or create the "News Of The Day" NotebookLM notebook
 - Clear previous day's sources and add today's
-- Generate an AI market briefing using OpenRouter
+- Generate an AI market briefing using NotebookLM
 """
 
 import os
+import re
 import asyncio
 import logging
-import httpx
+import urllib.request
+from datetime import datetime, timezone
 from notebooklm import NotebookLMClient
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_API_KEY = os.getenv("OPEN_ROUTER_API_KEY", "")
 NEWS_NOTEBOOK_TITLE = "News Of The Day"
-BRIEFING_MODEL = "openai/gpt-4o-mini"
+TELEGRAM_CHANNEL = "descifrandolaguerra"
 
 
 # ─── NotebookLM helpers ───────────────────────────────────────────────────────
@@ -66,27 +67,74 @@ def _is_blocked(url: str) -> bool:
     except Exception:
         return False
 
+
+def _normalize_url(url: str) -> str:
+    """Strip URL fragment (#section) so NotebookLM can fetch the full page."""
+    try:
+        from urllib.parse import urlparse, urlunparse
+        p = urlparse(url)
+        return urlunparse(p._replace(fragment=""))
+    except Exception:
+        return url
+
+
+def _dedup_urls(urls: list[str]) -> list[str]:
+    """Normalize and deduplicate URLs, preserving first-seen order."""
+    seen: set[str] = set()
+    result: list[str] = []
+    for url in urls:
+        norm = _normalize_url(url)
+        if norm not in seen:
+            seen.add(norm)
+            result.append(norm)
+    return result
+
 async def add_sources_to_notebook(notebook_id: str, urls: list[str]) -> dict:
-    """Add URLs to notebook, skipping Google News redirects and blocked domains."""
-    added, failed, skipped = 0, 0, 0
-    async with await NotebookLMClient.from_storage() as client:
-        for url in urls:
-            # Skip Google News redirect URLs — they require authentication to resolve
-            if "news.google.com" in url:
-                skipped += 1
-                continue
-            if _is_blocked(url):
-                skipped += 1
-                continue
+    """Add URLs to notebook in parallel (max 5 concurrent, 20s per URL)."""
+    added_urls: list[str] = []
+    failed_urls: list[str] = []
+    skipped_urls: list[str] = []
+
+    # Pre-filter
+    to_add: list[str] = []
+    for url in urls:
+        if "news.google.com" in url or _is_blocked(url):
+            skipped_urls.append(url)
+        else:
+            to_add.append(url)
+
+    semaphore = asyncio.Semaphore(5)
+
+    async def _add_one(url: str) -> tuple[str, str]:
+        async with semaphore:
             try:
-                await client.sources.add_url(notebook_id, url)
-                added += 1
+                async with await NotebookLMClient.from_storage() as client:
+                    await asyncio.wait_for(
+                        client.sources.add_url(notebook_id, url),
+                        timeout=20.0,
+                    )
+                return ("added", url)
             except Exception as e:
                 logger.warning("Could not add source %s: %s", url, e)
-                failed += 1
+                return ("failed", url)
 
-    logger.info("Sources: %d added, %d failed, %d skipped", added, failed, skipped)
-    return {"added": added, "failed": failed, "skipped": skipped}
+    results = await asyncio.gather(*[_add_one(u) for u in to_add])
+    for status, url in results:
+        if status == "added":
+            added_urls.append(url)
+        else:
+            failed_urls.append(url)
+
+    logger.info("Sources: %d added, %d failed, %d skipped",
+                len(added_urls), len(failed_urls), len(skipped_urls))
+    return {
+        "added": len(added_urls),
+        "failed": len(failed_urls),
+        "skipped": len(skipped_urls),
+        "added_urls": added_urls,
+        "failed_urls": failed_urls,
+        "skipped_urls": skipped_urls,
+    }
 
 
 # ─── Briefing generation ──────────────────────────────────────────────────────
@@ -104,11 +152,106 @@ def _build_news_context(news_items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-async def generate_briefing(news_items: list[dict]) -> str:
-    """Generate a market briefing from the given news items using OpenRouter."""
-    context = _build_news_context(news_items)
+def _extract_urls_from_news_items(news_items: list[dict]) -> list[str]:
+    """Extract and normalize URLs from news items."""
+    urls = []
+    for item in news_items:
+        url = item.get("url", "").strip()
+        if url and url.startswith(("http://", "https://")):
+            urls.append(_normalize_url(url))
+    return urls
 
-    prompt = f"""Eres un analista financiero experto. Analiza las siguientes noticias del día y genera un informe detallado en español sobre cómo afectan a los mercados financieros.
+
+async def fetch_telegram_channel_urls(channel: str) -> list[str]:
+    """Scrape a public Telegram channel and return external URLs from the 2 most recent days."""
+
+    def _fetch() -> str:
+        req = urllib.request.Request(
+            f"https://t.me/s/{channel}",
+            headers={"User-Agent": "Mozilla/5.0 (compatible; NewsBot/1.0)"},
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.read().decode("utf-8")
+
+    try:
+        html = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        logger.warning("Could not fetch Telegram channel %s: %s", channel, e)
+        return []
+
+    # Split into individual message blocks
+    blocks = re.split(r'(?=<div class="tgme_widget_message_wrap)', html)
+
+    # Collect (date, urls) per message
+    entries: list[tuple[object, list[str]]] = []
+    for block in blocks:
+        dt_match = re.search(r'datetime="([^"]+)"', block)
+        if not dt_match:
+            continue
+        try:
+            dt = datetime.fromisoformat(dt_match.group(1).replace("Z", "+00:00"))
+            msg_date = dt.astimezone(timezone.utc).date()
+        except Exception:
+            continue
+
+        # Extract links from the message text div
+        text_match = re.search(
+            r'class="tgme_widget_message_text[^"]*"[^>]*>(.*?)</div>',
+            block, re.DOTALL
+        )
+        if not text_match:
+            continue
+
+        urls = re.findall(r'href="(https?://[^"#][^"]*)"', text_match.group(1))
+        # Drop internal Telegram/t.me links, normalize fragments
+        urls = [
+            _normalize_url(u)
+            for u in urls
+            if "t.me" not in u and "telegram" not in u.lower()
+        ]
+        if urls:
+            entries.append((msg_date, urls))
+
+    if not entries:
+        logger.info("Telegram channel %s: no messages with URLs found", channel)
+        return []
+
+    # Take the 2 most recent distinct dates
+    all_dates = sorted({d for d, _ in entries}, reverse=True)
+    recent_dates = set(all_dates[:2])
+
+    result: list[str] = []
+    for d, urls in entries:
+        if d in recent_dates:
+            result.extend(urls)
+
+    unique = _dedup_urls(result)
+    logger.info("Telegram channel %s: %d URLs from %s", channel, len(unique), sorted(recent_dates, reverse=True))
+    return unique
+
+
+async def generate_briefing(news_items: list[dict]) -> dict:
+    """Generate a market briefing from the given news items using NotebookLM.
+    Returns a dict with 'briefing', 'added_urls', and 'failed_urls'.
+    """
+    added_urls: list[str] = []
+    failed_urls: list[str] = []
+    telegram_urls: list[str] = []
+    try:
+        notebook_id = await get_or_create_news_notebook()
+        await clear_notebook_sources(notebook_id)
+
+        # Fetch Telegram channel URLs in parallel with notebook setup
+        telegram_urls = await fetch_telegram_channel_urls(TELEGRAM_CHANNEL)
+
+        news_urls = _extract_urls_from_news_items(news_items)
+        all_urls = _dedup_urls(news_urls + telegram_urls)
+        if all_urls:
+            result = await add_sources_to_notebook(notebook_id, all_urls)
+            added_urls = result["added_urls"]
+            failed_urls = result["failed_urls"]
+
+        prompt = """Eres un analista financiero experto. Analiza las fuentes de noticias cargadas en este notebook y genera un informe detallado en español sobre cómo afectan a los mercados financieros.
 
 El informe debe incluir:
 1. **Resumen ejecutivo** (3-4 frases con los puntos más importantes del día)
@@ -117,29 +260,25 @@ El informe debe incluir:
 4. **Contexto macro** (inflación, tipos de interés, geopolítica si aplica)
 5. **Conclusión y perspectiva** (qué vigilar en las próximas horas/días)
 
-Noticias del día:
-{context}
-
 Genera el informe de forma estructurada, clara y profesional. Responde SIEMPRE EN ESPAÑOL."""
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://pask-stocks.vercel.app",
-                "X-Title": "PASK Stocks",
-            },
-            json={
-                "model": BRIEFING_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 1500,
+        async with await NotebookLMClient.from_storage() as client:
+            result = await client.chat.ask(notebook_id, prompt)
+            return {
+                "briefing": result.answer.strip(),
+                "added_urls": added_urls,
+                "failed_urls": failed_urls,
+                "telegram_urls": telegram_urls,
             }
-        )
-        data = resp.json()
-        return data["choices"][0]["message"]["content"].strip()
+
+    except Exception as e:
+        logger.error(f"Error generating briefing with NotebookLM: {e}")
+        return {
+            "briefing": _build_news_context(news_items),
+            "added_urls": added_urls,
+            "failed_urls": failed_urls,
+            "telegram_urls": telegram_urls,
+        }
 
 
 # ─── Main orchestration ───────────────────────────────────────────────────────
