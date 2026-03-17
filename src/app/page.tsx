@@ -273,6 +273,11 @@ function AnalyzeTab() {
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-12 space-y-8">
+      <div className="flex justify-end">
+        <Link href="/settings" className="text-xs text-gray-500 hover:text-emerald-500 transition-colors">
+          ⚙️ Configuración
+        </Link>
+      </div>
       <div className="text-center space-y-2">
         <h1 className="text-3xl font-bold tracking-tight">Analizador de acciones</h1>
         <p className="text-gray-400 text-sm">Indicadores técnicos · MA50 · MA200 · RSI · Señal Buy / Sell / Hold</p>

@@ -76,18 +76,22 @@ export async function GET(req: NextRequest) {
     const latest = prices[prices.length - 1];
     const previous = prices[prices.length - 2];
 
-    const price = latest.close;
-    const change = price - previous.close;
-    const changePercent = (change / previous.close) * 100;
-    const ma50 = calculateMA(closes, 50);
-    const ma200 = calculateMA(closes, 200);
-    const rsi = calculateRSI(closes, 14);
-    const { signal } = getRecommendation(price, ma50, ma200, rsi);
-
     const ap = summary.assetProfile;
     const sd = summary.summaryDetail;
     const fd = summary.financialData;
     const pr = summary.price;
+
+    // Use real-time price if available, otherwise fallback to latest historical close
+    const price = pr?.regularMarketPrice ?? latest.close;
+    const change = pr?.regularMarketChange ?? (price - previous.close);
+    const changePercent = pr?.regularMarketChangePercent
+      ? pr.regularMarketChangePercent * 100
+      : (change / previous.close) * 100;
+
+    const ma50 = calculateMA(closes, 50);
+    const ma200 = calculateMA(closes, 200);
+    const rsi = calculateRSI(closes, 14);
+    const { signal } = getRecommendation(price, ma50, ma200, rsi);
 
     const info: StockInfo = {
       ticker,
@@ -101,7 +105,7 @@ export async function GET(req: NextRequest) {
       price,
       change,
       changePercent,
-      volume: latest.volume,
+      volume: pr?.regularMarketVolume ?? latest.volume,
       ma50,
       ma200,
       rsi,

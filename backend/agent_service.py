@@ -2,7 +2,7 @@ import re
 import asyncio
 from ddgs import DDGS
 from notebooklm import NotebookLMClient
-from notebooklm_service import notebooklm_service
+from notebooklm_service import notebooklm_service, get_notebook_client
 
 # ─── Rol del analista (se establece como custom_prompt del notebook) ──────────
 # Corto a propósito: va en configure(), no en cada mensaje
@@ -66,57 +66,196 @@ COMMAND_SEARCHES: dict[str, list[str]] = {
 
 COMMAND_TEMPLATES = {
     "/one-pager": (
-        "Genera un one-pager profesional de calidad investment banking para {ticker} ({name}). "
-        "Estructura: 4 cuadrantes — descripción empresa, posicionamiento competitivo, "
-        "métricas financieras clave (tabla), comportamiento bursátil. "
-        "Incluye veredicto COMPRAR/MANTENER/VENDER con price target estimado."
+        "Genera un one-pager profesional de calidad investment banking para {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Company Overview\n"
+        "- **Modelo de Negocio:** [Descripción breve]\n"
+        "- **Segmentos:** [Lista de segmentos y % ingresos]\n\n"
+        "# 2. Análisis Competitivo\n"
+        "- **Posición en el mercado:** [Líder/Challenger/Nicho]\n"
+        "- **Moat:** [Descripción de ventajas competitivas]\n\n"
+        "# 3. Financial Metrics\n"
+        "| Métrica | Valor |\n"
+        "|---|---|\n"
+        "| Ingresos LTM | ... |\n"
+        "| EBITDA | ... |\n"
+        "| Margen Neto | ... |\n"
+        "| Deuda Neta/EBITDA | ... |\n\n"
+        "# 4. Comportamiento Bursátil & Valoración\n"
+        "- **YTD Return:** [...]\n"
+        "- **Múltiplo EV/EBITDA:** [...]\n\n"
+        "# Veredicto\n"
+        "**[COMPRAR / MANTENER / VENDER]**\n"
+        "*Price Target Estimado: $[...]*"
     ),
     "/dcf": (
-        "Realiza un modelo DCF institucional completo para {ticker} ({name}): "
-        "calcula UFCF histórico (EBIT×(1-t)+D&A-CapEx-ΔNWC), proyecta 5 años en 3 escenarios "
-        "(bajista/base/alcista), estima WACC con CAPM, calcula valor terminal por Gordon y múltiplo "
-        "de salida, y muestra tabla de sensibilidad WACC vs. tasa de crecimiento terminal. "
-        "Usa los datos financieros de las búsquedas realizadas."
+        "Realiza un modelo DCF institucional completo para {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Supuestos del Modelo\n"
+        "- **WACC:** [Cálculo detallado: Rf, Beta, ERP]\n"
+        "- **Tasa de Crecimiento Terminal (g):** [...]\n"
+        "- **Tasa Impositiva:** [...]\n\n"
+        "# 2. Proyección de Free Cash Flow (FCF)\n"
+        "| Año | 1 | 2 | 3 | 4 | 5 |\n"
+        "|---|---|---|---|---|---|\n"
+        "| Ingresos | ... | ... | ... | ... | ... |\n"
+        "| EBIT | ... | ... | ... | ... | ... |\n"
+        "| (-) Impuestos | ... | ... | ... | ... | ... |\n"
+        "| (+) D&A | ... | ... | ... | ... | ... |\n"
+        "| (-) CapEx | ... | ... | ... | ... | ... |\n"
+        "| (-) Var. NWC | ... | ... | ... | ... | ... |\n"
+        "| **UFCF** | **...** | **...** | **...** | **...** | **...** |\n\n"
+        "# 3. Valoración\n"
+        "- **Valor Presente de FCF:** [...]\n"
+        "- **Valor Terminal:** [...]\n"
+        "- **Enterprise Value (EV):** [...]\n"
+        "- **Equity Value:** [...]\n"
+        "- **Precio por Acción Implícito:** **$[...]**\n\n"
+        "# 4. Análisis de Sensibilidad\n"
+        "| WACC \\ g | 2.0% | 2.5% | 3.0% |\n"
+        "|---|---|---|---|\n"
+        "| **8%** | $... | $... | $... |\n"
+        "| **10%** | $... | $... | $... |\n"
+        "| **12%** | $... | $... | $... |"
     ),
     "/earnings": (
-        "Analiza los últimos resultados trimestrales de {ticker} ({name}): "
-        "titular beat/miss, tabla resultados vs. estimaciones, análisis márgenes, "
-        "guidance actualizado, 3-5 puntos clave del earnings call, reacción del mercado."
+        "Analiza los últimos resultados trimestrales de {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Titular (Beat/Miss)\n"
+        "- **EPS:** [Reportado] vs [Esperado] -> [Beat/Miss]\n"
+        "- **Revenue:** [Reportado] vs [Esperado] -> [Beat/Miss]\n\n"
+        "# 2. Tabla de Resultados\n"
+        "| Partida | Valor Q | Variación YoY |\n"
+        "|---|---|---|\n"
+        "| Ingresos | ... | ...% |\n"
+        "| Margen Bruto | ...% | ... bps |\n"
+        "| Ingreso Neto | ... | ...% |\n\n"
+        "# 3. Key Takeaways del Earnings Call\n"
+        "- [Punto clave 1]\n"
+        "- [Punto clave 2]\n"
+        "- [Punto clave 3]\n\n"
+        "# 4. Guidance & Outlook\n"
+        "Descripción del guidance para el próximo trimestre/año.\n\n"
+        "# 5. Reacción del Mercado\n"
+        "Análisis del movimiento de la acción tras el reporte."
     ),
     "/comps": (
-        "Construye un análisis de comparables institucional para {ticker} ({name}): "
-        "identifica 5-8 empresas del mismo sector, calcula EV/EBITDA, EV/Ventas y PER (LTM y NTM), "
-        "presenta tabla comparativa con mediana del sector y valoración implícita."
+        "Construye un análisis de comparables (Comps) para {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Selección de Peers\n"
+        "Lista las 5 empresas comparables seleccionadas y por qué.\n\n"
+        "# 2. Tabla de Valoración Relativa\n"
+        "| Ticker | Empresa | EV/Sales | EV/EBITDA | P/E (LTM) | P/E (NTM) |\n"
+        "|---|---|---|---|---|---|\n"
+        "| [TICKER] | [Nombre] | ...x | ...x | ...x | ...x |\n"
+        "| ... | ... | ... | ... | ... | ... |\n"
+        "| **PROMEDIO** | | **...x** | **...x** | **...x** | **...x** |\n"
+        "| **MEDIANA** | | **...x** | **...x** | **...x** | **...x** |\n\n"
+        "# 3. Valoración Implícita\n"
+        "Calcula el precio de la acción de {ticker} aplicando los múltiplos promedio/mediana de los pares a sus métricas financieras."
     ),
     "/competitive": (
-        "Realiza un análisis competitivo completo para {ticker} ({name}): "
-        "métricas clave del sector, mapa competidores, deep-dive 3-4 principales rivales, "
-        "tabla comparativa con ratings, evaluación del moat y escenarios alcista/base/bajista."
+        "Realiza un análisis competitivo completo para {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Panorama Competitivo\n"
+        "Descripción general de la industria y tendencias clave.\n\n"
+        "# 2. Tabla Comparativa Directa\n"
+        "| Característica | {ticker} | Competidor A | Competidor B |\n"
+        "|---|---|---|---|\n"
+        "| Market Cap | ... | ... | ... |\n"
+        "| Crecimiento | ... | ... | ... |\n"
+        "| Márgenes | ... | ... | ... |\n"
+        "| Puntos Fuertes | ... | ... | ... |\n\n"
+        "# 3. Análisis de Ventajas (Moat)\n"
+        "- **Tipo de Moat:** [Red / Costos / Marca / Switching Costs]\n"
+        "- **Durabilidad:** [Alta/Media/Baja]\n\n"
+        "# 4. Análisis SWOT (FODA)\n"
+        "- **Fortalezas:** ...\n"
+        "- **Debilidades:** ...\n"
+        "- **Oportunidades:** ...\n"
+        "- **Amenazas:** ..."
     ),
     "/screen": (
-        "Genera ideas de inversión en el sector de {ticker} ({name}) aplicando pantallas "
-        "value, growth y quality. Para cada idea: métricas vs. pares, tesis 3-5 bullets, "
-        "catalizador y riesgos. Devuelve shortlist de 3-5 ideas ordenadas por convicción."
+        "Genera un stock screener con ideas de inversión relacionadas con el sector de {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# Criterios del Screener\n"
+        "Explica qué factores has usado (ej: PER bajo, alto crecimiento, calidad).\n\n"
+        "# Top Picks (3-5 ideas)\n"
+        "## 1. [Ticker] - [Nombre]\n"
+        "- **Tesis:** [Por qué es buena inversión]\n"
+        "- **Catalizador:** [Evento que subirá el precio]\n"
+        "- **Riesgo Principal:** [Qué puede salir mal]\n\n"
+        "## 2. [Ticker] - [Nombre]\n"
+        "...\n\n"
+        "# Tabla Resumen\n"
+        "| Ticker | Precio | Target | Upside |\n"
+        "|---|---|---|---|\n"
+        "| ... | ... | ... | ... |"
     ),
     "/initiate": (
-        "Inicia cobertura de {ticker} ({name}) con informe institucional completo: "
-        "executive summary con rating y price target, company overview, investment thesis "
-        "(3-5 catalizadores), valoración (DCF + comps), risk factors y tabla financiera resumen."
+        "Inicia cobertura de {ticker} ({name}) con informe institucional completo.\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# INICIO DE COBERTURA: {ticker}\n"
+        "**RATING:** [COMPRAR/MANTENER/VENDER]\n"
+        "**PRICE TARGET:** $[...]\n\n"
+        "# 1. Tesis de Inversión\n"
+        "Argumento central en 3 puntos clave.\n\n"
+        "# 2. Resumen Financiero\n"
+        "| Año | Ingresos | EBITDA | EPS |\n"
+        "|---|---|---|---|\n"
+        "| 2023 | ... | ... | ... |\n"
+        "| 2024E | ... | ... | ... |\n"
+        "| 2025E | ... | ... | ... |\n\n"
+        "# 3. Valoración\n"
+        "Resumen de métodos usados (DCF, Comps) y rango de precios.\n\n"
+        "# 4. Riesgos Principales\n"
+        "Lista de riesgos (Bear case)."
     ),
     "/merger": (
-        "Analiza la operación de M&A de {ticker} ({name}): "
-        "deal summary, rationale y sinergias, valoración, financing, análisis regulatorio "
-        "y conclusión sobre si es un buen negocio para ambas partes."
+        "Analiza la operación de M&A reciente de {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Detalles de la Transacción\n"
+        "- **Target:** ...\n"
+        "- **Valor del Deal:** ...\n"
+        "- **Tipo:** [Efectivo / Acciones / Mixto]\n\n"
+        "# 2. Rationale Estratégico\n"
+        "¿Por qué tiene sentido esta compra?\n\n"
+        "# 3. Sinergias y Valoración\n"
+        "Análisis de precio pagado (prima) y sinergias esperadas.\n\n"
+        "# 4. Veredicto\n"
+        "¿Es bueno para los accionistas? [POSITIVO / NEUTRO / NEGATIVO]"
     ),
     "/ipo": (
-        "Analiza el IPO de {ticker} ({name}): company overview, business model, TAM/SAM/SOM, "
-        "financials históricos y proyectados, valoración vs. comparables, risk factors "
-        "y rating COMPRAR/MANTENER/VENDER."
+        "Analiza el IPO de {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Perfil de la IPO\n"
+        "- **Fecha:** ...\n"
+        "- **Precio Salida:** ...\n"
+        "- **Capital Levantado:** ...\n\n"
+        "# 2. Modelo de Negocio\n"
+        "¿Cómo gana dinero?\n\n"
+        "# 3. Financials (S-1)\n"
+        "Análisis de ingresos y rentabilidad previos a la salida.\n\n"
+        "# 4. Valoración y Peers\n"
+        "Comparativa con empresas cotizadas similares.\n\n"
+        "# 5. Conclusión\n"
+        "**[PARTICIPAR / ESPERAR]**"
     ),
     "/credit": (
-        "Realiza un análisis de crédito corporativo para {ticker} ({name}): "
-        "ratios solvencia (Deuda/EBITDA, cobertura intereses), liquidez, estructura de capital, "
-        "vencimientos, covenants, rating crediticio implícito y recomendación."
+        "Realiza un análisis de crédito corporativo para {ticker} ({name}).\n"
+        "RESPONDE ESTRICTAMENTE CON ESTA ESTRUCTURA MARKDOWN:\n"
+        "# 1. Perfil Crediticio\n"
+        "- **Rating:** [IG / High Yield]\n"
+        "- **Perspectiva:** [Estable / Positiva / Negativa]\n\n"
+        "# 2. Ratios de Solvencia\n"
+        "| Ratio | Valor | Benchmark |\n"
+        "|---|---|---|\n"
+        "| Deuda Neta / EBITDA | ...x | <3.0x |\n"
+        "| Cobertura Intereses (EBIT/Int) | ...x | >5.0x |\n\n"
+        "# 3. Liquidez y Vencimientos\n"
+        "Análisis de caja disponible y calendario de deuda.\n\n"
+        "# 4. Conclusión de Crédito\n"
+        "Evaluación final del riesgo de impago."
     ),
 }
 
@@ -154,10 +293,15 @@ def _extract_ticker_name(stock_context: str) -> tuple[str, str]:
     return ticker, name
 
 
-async def _run_searches(queries: list[str], actions: list) -> str:
-    """Ejecuta búsquedas en paralelo. Devuelve resultados resumidos (título + URL + snippet corto)."""
+async def _run_searches(queries: list[str], actions: list) -> tuple[str, list[str]]:
+    """
+    Ejecuta búsquedas en paralelo.
+    Devuelve:
+      1. Texto resumen (título + snippet) para contexto inmediato.
+      2. Lista de URLs únicas encontradas para añadir como fuentes.
+    """
     if not queries:
-        return ""
+        return "", []
 
     async def search_one(query: str) -> tuple[str, list]:
         try:
@@ -172,16 +316,24 @@ async def _run_searches(queries: list[str], actions: list) -> str:
     results_list = await asyncio.gather(*[search_one(q) for q in queries])
 
     parts = []
+    found_urls = set()
+
     for query, results in results_list:
         actions.append({"type": "search", "query": query, "count": len(results)})
         if results:
             lines = [f"[{query}]"]
             for r in results:
+                url = r.get('href', '')
+                if url:
+                    found_urls.add(url)
+                
                 body = r.get("body", "")[:200]  # truncado para controlar longitud
-                lines.append(f"• {r.get('title', '')} | {r.get('href', '')}\n  {body}")
+                lines.append(f"• {r.get('title', '')} | {url}\n  {body}")
             parts.append("\n".join(lines))
 
-    return "\n\n".join(parts)
+    # Limitar a top 5 URLs para no saturar
+    top_urls = list(found_urls)[:5]
+    return "\n\n".join(parts), top_urls
 
 
 async def _resolve_notebook_id(notebook_id: str | None) -> str:
@@ -200,9 +352,10 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
     """
     Flujo:
     1. Expandir comando si aplica (/dcf, /earnings, etc.)
-    2. Buscar datos relevantes en internet (ddgs, paralelo)
-    3. Configurar notebook con rol de analista (custom_prompt, persiste)
-    4. Enviar pregunta corta + datos a NotebookLM y devolver respuesta
+    2. Buscar datos relevantes en internet (ddgs, paralelo) -> Obtener URLs y Snippets
+    3. Añadir URLs encontradas como FUENTES al notebook (crawler de NotebookLM)
+    4. Añadir Snippets + StockInfo como FUENTE DE TEXTO (contexto inmediato)
+    5. Enviar pregunta a NotebookLM
     """
     actions = []
 
@@ -223,17 +376,60 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
     if not search_queries and ticker and len(question.strip()) > 10:
         search_queries = [f"{ticker} {name} {question.strip()[:60]}"]
 
-    search_context = await _run_searches(search_queries, actions)
+    # Ejecutar búsquedas
+    search_snippets, found_urls = await _run_searches(search_queries, actions)
 
-    # Construir el mensaje para NotebookLM (corto, sin instrucciones de rol)
-    parts: list[str] = []
+    # Resolver ID del notebook
+    try:
+        nb_id = await _resolve_notebook_id(notebook_id)
+    except Exception as e:
+        return {"answer": f"Error: No se encontró el notebook. {e}", "actions": actions}
 
+    # ─── AÑADIR FUENTES URL (INTERNET) ────────────────────────────────────────
+    if found_urls:
+        try:
+            # Añadimos las URLs encontradas como fuentes reales y ESPERAMOS que se procesen
+            # Para que el modelo pueda leerlas antes de contestar
+            res = await notebooklm_service.add_news_sources(found_urls, nb_id)
+            for item in res.get("added", []):
+                actions.append({
+                    "type": "source_added",
+                    "title": f"Web: {item.get('url')}",
+                    "url": item.get('url')
+                })
+            
+            if res.get("failed"):
+                print(f"Algunas URLs fallaron: {res['failed']}")
+        except Exception as e:
+            print(f"Error añadiendo URLs como fuentes: {e}")
+
+    # ─── AÑADIR FUENTE DE TEXTO (CONTEXTO INMEDIATO) ──────────────────────────
+    # Siempre útil por si las webs tienen paywall o tardan en procesarse
+    context_content = ""
     if stock_context:
-        parts.append(f"DATOS DE LA ACCIÓN:\n{stock_context}")
+        context_content += f"DATOS DE LA ACCIÓN ({ticker}):\n{stock_context}\n\n"
+    if search_snippets:
+        context_content += f"RESUMEN DE BÚSQUEDA ({ticker}):\n{search_snippets}\n\n"
 
-    if search_context:
-        parts.append(f"DATOS DE INTERNET:\n{search_context}")
+    parts: list[str] = []
+    source_added = False
 
+    if context_content.strip():
+        try:
+            source_title = f"Datos rápidos {ticker or 'Empresa'} - {question[:30]}..."
+            # Añadir una espera de seguridad después de añadir texto
+            await notebooklm_service.add_source_text(source_title, context_content, nb_id)
+            await asyncio.sleep(2) # Pequeña pausa para asegurar consistencia
+            actions.append({"type": "source_added", "title": source_title})
+            source_added = True
+        except Exception as e:
+            print(f"Error añadiendo fuente de texto: {e}")
+            # Fallback al prompt si falla
+            if stock_context: parts.append(f"DATOS DE LA ACCIÓN:\n{stock_context}")
+            if search_snippets: parts.append(f"RESUMEN BÚSQUEDA:\n{search_snippets}")
+
+    # ─── CONSTRUIR MENSAJE ────────────────────────────────────────────────────
+    
     if history:
         hist_lines = []
         for m in history[-4:]:
@@ -242,14 +438,23 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
         parts.append("HISTORIAL:\n" + "\n\n".join(hist_lines))
 
     parts.append(f"TAREA:\n{expanded_question}")
+    
+    notes = []
+    if found_urls:
+        notes.append("He añadido varias páginas web relevantes como fuentes al cuaderno.")
+    if source_added:
+        notes.append("He añadido un resumen de datos financieros y búsqueda como fuente de texto.")
+    
+    if notes:
+        parts.append(f"(Nota: {' '.join(notes)} Úsalas para realizar el análisis más completo posible.)")
 
     final_message = "\n\n---\n\n".join(parts)
 
     # Preguntar a NotebookLM con el rol configurado como custom_prompt
     try:
-        nb_id = await _resolve_notebook_id(notebook_id)
+        # nb_id ya resuelto arriba
 
-        async with await NotebookLMClient.from_storage() as client:
+        async with await get_notebook_client() as client:
             from notebooklm.rpc import ChatGoal, ChatResponseLength
             await client.chat.configure(
                 nb_id,

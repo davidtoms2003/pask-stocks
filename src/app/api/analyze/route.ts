@@ -53,7 +53,12 @@ export async function GET(req: NextRequest) {
 
   try {
     const useMock = process.env.ALPHA_VANTAGE_API_KEY === 'mock';
-    const prices = useMock ? getMockPrices(ticker) : await fetchYahoo(ticker);
+    
+    // Fetch historical data and real-time quote in parallel
+    const [prices, summary] = await Promise.all([
+      useMock ? getMockPrices(ticker) : fetchYahoo(ticker),
+      !useMock ? yahooFinance.quoteSummary(ticker, { modules: ['price'] }) : Promise.resolve(null),
+    ]);
 
     if (prices.length < 201) {
       return NextResponse.json(
@@ -66,10 +71,22 @@ export async function GET(req: NextRequest) {
     const latest = prices[prices.length - 1];
     const previous = prices[prices.length - 2];
 
-    const price = latest.close;
-    const change = price - previous.close;
-    const changePercent = (change / previous.close) * 100;
-    const volume = latest.volume;
+    const pr = summary?.price;
+
+    // Use real-time price if available, otherwise fallback to latest historical close
+    // Handle null values from API explicitly
+    const price = (pr?.regularMarketPrice != null) ? pr.regularMarketPrice : latest.close;
+    
+    // For change, prefer real-time, else calc from latest historical vs previous
+    const change = (pr?.regularMarketChange != null) 
+      ? pr.regularMarketChange 
+      : (price - previous.close);
+      
+    const changePercent = (pr?.regularMarketChangePercent != null)
+      ? pr.regularMarketChangePercent * 100
+      : (change / previous.close) * 100;
+      
+    const volume = (pr?.regularMarketVolume != null) ? pr.regularMarketVolume : latest.volume;
 
     const ma50 = calculateMA(closes, 50);
     const ma200 = calculateMA(closes, 200);

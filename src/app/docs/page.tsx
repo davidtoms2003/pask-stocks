@@ -353,9 +353,13 @@ function DocsChatWidget({ activeTerm, forceOpen }: { activeTerm: string | null; 
     setLoading(true);
 
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const apiKey = localStorage.getItem('openrouter_key');
+      if (apiKey) headers['X-OpenRouter-Key'] = apiKey;
+
       const res = await fetch('/api/docs-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ question: q, termContext: activeTerm ?? undefined }),
       });
       const data = await res.json();

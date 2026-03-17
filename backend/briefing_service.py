@@ -14,6 +14,7 @@ import logging
 import urllib.request
 from datetime import datetime, timezone
 from notebooklm import NotebookLMClient
+from notebooklm_service import get_notebook_client
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ TELEGRAM_CHANNEL = "descifrandolaguerra"
 
 async def get_or_create_news_notebook() -> str:
     """Returns the ID of the 'News Of The Day' notebook, creating it if needed."""
-    async with await NotebookLMClient.from_storage() as client:
+    async with await get_notebook_client() as client:
         notebooks = await client.notebooks.list()
         existing = next((nb for nb in notebooks if nb.title == NEWS_NOTEBOOK_TITLE), None)
         if existing:
@@ -37,7 +38,7 @@ async def get_or_create_news_notebook() -> str:
 
 async def clear_notebook_sources(notebook_id: str) -> int:
     """Deletes all existing sources from the notebook. Returns count deleted."""
-    async with await NotebookLMClient.from_storage() as client:
+    async with await get_notebook_client() as client:
         sources = await client.sources.list(notebook_id)
         if not sources:
             return 0
@@ -108,7 +109,7 @@ async def add_sources_to_notebook(notebook_id: str, urls: list[str]) -> dict:
     async def _add_one(url: str) -> tuple[str, str]:
         async with semaphore:
             try:
-                async with await NotebookLMClient.from_storage() as client:
+                async with await get_notebook_client() as client:
                     await asyncio.wait_for(
                         client.sources.add_url(notebook_id, url),
                         timeout=20.0,
@@ -262,7 +263,7 @@ El informe debe incluir:
 
 Genera el informe de forma estructurada, clara y profesional. Responde SIEMPRE EN ESPAÑOL."""
 
-        async with await NotebookLMClient.from_storage() as client:
+        async with await get_notebook_client() as client:
             result = await client.chat.ask(notebook_id, prompt)
             return {
                 "briefing": result.answer.strip(),

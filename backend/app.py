@@ -48,6 +48,44 @@ class ChatAgentRequest(BaseModel):
     history: list[dict] = []
     notebook_id: str | None = None
 
+class NotebookLMConfigRequest(BaseModel):
+    cookies: dict[str, str]
+
+@app.post("/api/config/notebooklm")
+async def config_notebooklm(request: NotebookLMConfigRequest):
+    try:
+        import json
+        
+        # Convert simple cookie dict to Playwright storage_state format
+        # This allows the library to load it as if it were a browser session
+        cookies_list = []
+        for name, value in request.cookies.items():
+            cookies_list.append({
+                "name": name,
+                "value": value,
+                "domain": ".google.com",
+                "path": "/",
+                "secure": True,
+                "httpOnly": name in ["SID", "HSID", "SSID", "OSID", "__Secure-1PSID", "__Secure-3PSID"],
+                "sameSite": "None",
+                "expires": -1
+            })
+            
+        storage_state = {
+            "cookies": cookies_list,
+            "origins": []
+        }
+        
+        # Save to a local file in the backend directory
+        auth_path = Path("auth_cookies.json")
+        with open(auth_path, "w") as f:
+            json.dump(storage_state, f, indent=2)
+            
+        # Force service reload/re-init if needed (usually just next call will use it)
+        return {"success": True, "message": "Configuración guardada. Reinicia el backend si no surte efecto inmediato."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/notebooks")
 async def get_notebooks():
     try:
