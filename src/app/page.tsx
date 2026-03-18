@@ -1308,9 +1308,13 @@ function NewsTab() {
     setBriefingError(null);
     setBriefing(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const newsApiKey = localStorage.getItem('news_api_key');
+      if (newsApiKey) headers['X-News-Api-Key'] = newsApiKey;
+
       const res = await fetch('/api/daily-briefing', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ news }),
       });
       const d = await res.json();
