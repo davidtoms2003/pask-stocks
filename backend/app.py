@@ -49,28 +49,76 @@ class ChatAgentRequest(BaseModel):
     notebook_id: str | None = None
 
 class NotebookLMConfigRequest(BaseModel):
-    cookies: dict[str, str]
+    cookies: list[dict] | dict[str, str]
+    format: str | None = "simple"
 
 @app.post("/api/config/notebooklm")
 async def config_notebooklm(request: NotebookLMConfigRequest):
     try:
         import json
         
-        # Convert simple cookie dict to Playwright storage_state format
-        # This allows the library to load it as if it were a browser session
         cookies_list = []
-        for name, value in request.cookies.items():
-            cookies_list.append({
-                "name": name,
-                "value": value,
-                "domain": ".google.com",
-                "path": "/",
-                "secure": True,
-                "httpOnly": name in ["SID", "HSID", "SSID", "OSID", "__Secure-1PSID", "__Secure-3PSID"],
-                "sameSite": "None",
-                "expires": -1
-            })
-            
+        
+        # Modo avanzado: EditThisCookie (lista de objetos)
+        if isinstance(request.cookies, list) and request.format == "editthiscookie":
+            for c in request.cookies:
+                # Convertir formato EditThisCookie a Playwright storage_state
+                # EditThisCookie usa "expirationDate", Playwright usa "expires"
+                # EditThisCookie usa "sameSite": "no_restriction", Playwright usa "None"
+                cookie = {
+                    "name": c.get("name"),
+                    "value": c.get("value"),
+                    "domain": c.get("domain", ".google.com"),
+                    "path": c.get("path", "/"),
+                    "expires": c.get("expirationDate", -1),
+                    "httpOnly": c.get("httpOnly", False),
+                    "secure": c.get("secure", True),
+                    "sameSite": "None" if c.get("sameSite") in ["no_restriction", "unspecified"] else c.get("sameSite", "Lax")
+                }
+                # Fix for sameSite value mapping
+                if cookie["sameSite"] == "lax": cookie["sameSite"] = "Lax"
+                if cookie["sameSite"] == "strict": cookie["sameSite"] = "Strict"
+                if cookie["sameSite"] == "no_restriction": cookie["sameSite"] = "None"
+                
+                # IMPORTANT: Playwright / NotebookLM client strictly requires domain to start with '.' for cross-subdomain auth
+                # But sometimes EditThisCookie exports 'google.com' without dot.
+                # Also, some cookies for 'notebooklm.google.com' should be kept as is.
+                if cookie["domain"] == "google.com":
+                     cookie["domain"] = ".google.com"
+
+                cookies_list.append(cookie)
+        
+        # Modo simple: dict clave-valor (fallback)
+        elif isinstance(request.cookies, dict):
+            for name, value in request.cookies.items():
+                cookies_list.append({
+                    "name": name,
+                    "value": value,
+                    "domain": ".google.com",
+                    "path": "/",
+                    "secure": True,
+                    "httpOnly": name in ["SID", "HSID", "SSID", "OSID", "__Secure-1PSID", "__Secure-3PSID"],
+                    "sameSite": "None",
+                    "expires": -1
+                })
+        else:
+             # Si llega una lista pero sin formato explícito, intentamos procesarla como EditThisCookie simplificado
+            if isinstance(request.cookies, list):
+                 for c in request.cookies:
+                    if "name" in c and "value" in c:
+                        cookies_list.append({
+                            "name": c["name"],
+                            "value": c["value"],
+                            "domain": c.get("domain", ".google.com"),
+                            "path": c.get("path", "/"),
+                            "expires": -1,
+                            "secure": True,
+                            "sameSite": "None"
+                        })
+        
+        # Eliminar duplicados si los hubiera
+        # (Aunque es raro, a veces EditThisCookie puede exportar varias veces)
+        
         storage_state = {
             "cookies": cookies_list,
             "origins": []
@@ -85,6 +133,23 @@ async def config_notebooklm(request: NotebookLMConfigRequest):
         return {"success": True, "message": "Configuración guardada. Reinicia el backend si no surte efecto inmediato."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/api/config/notebooklm")
+async def delete_notebooklm_config():
+    try:
+        auth_path = Path("auth_cookies.json")
+        if auth_path.exists():
+            auth_path.unlink()
+            return {"success": True, "message": "Configuración eliminada correctamente."}
+        else:
+            return {"success": True, "message": "No había configuración guardada."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/config/notebooklm/status")
+async def get_notebooklm_status():
+    auth_path = Path("auth_cookies.json")
+    return {"configured": auth_path.exists()}
 
 @app.get("/api/notebooks")
 async def get_notebooks():

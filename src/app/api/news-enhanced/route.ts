@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 
@@ -54,8 +54,6 @@ function writeCache(news: EnhancedNewsItem[], sourcesSynced = false) {
 
 // ─── NewsAPI ──────────────────────────────────────────────────────────────────
 
-const NEWS_API_KEY = process.env.NEWS_API_KEY ?? '';
-
 // Fuentes de confianza financiera/económica
 const TRUSTED_FINANCIAL_SOURCES = new Set([
   'Reuters', 'Bloomberg', 'CNBC', 'MarketWatch', 'The Wall Street Journal',
@@ -77,8 +75,8 @@ interface NewsApiArticle {
   source: { name: string };
 }
 
-async function fetchNewsApi(): Promise<EnhancedNewsItem[]> {
-  if (!NEWS_API_KEY) return [];
+async function fetchNewsApi(apiKey: string): Promise<EnhancedNewsItem[]> {
+  if (!apiKey) return [];
 
   // Fetch from last 48 hours to ensure freshness
   const from = new Date(Date.now() - 48 * 3_600_000).toISOString().slice(0, 10);
@@ -91,7 +89,7 @@ async function fetchNewsApi(): Promise<EnhancedNewsItem[]> {
   const results = await Promise.all(
     queries.map(async ({ q, category }) => {
       try {
-        const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&from=${from}&pageSize=20&apiKey=${NEWS_API_KEY}`;
+        const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&from=${from}&pageSize=20&apiKey=${apiKey}`;
         const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
         if (!res.ok) return [];
         const data = await res.json() as { articles: NewsApiArticle[] };
@@ -203,7 +201,10 @@ async function fetchGoogleNewsRss(): Promise<EnhancedNewsItem[]> {
 
 // ─── Route ────────────────────────────────────────────────────────────────────
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const clientNewsKey = request.headers.get('X-News-Api-Key');
+  const newsApiKey = clientNewsKey || process.env.NEWS_API_KEY || '';
+
   // Serve from cache if same day
   const cached = readCache();
   if (cached) {
@@ -211,7 +212,7 @@ export async function GET() {
   }
 
   // Fetch fresh: NewsAPI (filtrado) + Google News RSS siempre, Yahoo solo si no hay nada más
-  const [newsApiItems, rssItems] = await Promise.all([fetchNewsApi(), fetchGoogleNewsRss()]);
+  const [newsApiItems, rssItems] = await Promise.all([fetchNewsApi(newsApiKey), fetchGoogleNewsRss()]);
   const yahooItems = (newsApiItems.length + rssItems.length) === 0 ? await fetchYahooFallback() : [];
 
   const all = [...newsApiItems, ...rssItems, ...yahooItems];

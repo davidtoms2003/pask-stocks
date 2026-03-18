@@ -207,9 +207,13 @@ function AnalyzeTab() {
     setAiSignal(null);
     setAiExplanation(null);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const apiKey = localStorage.getItem('openrouter_key');
+      if (apiKey) headers['X-OpenRouter-Key'] = apiKey;
+
       const res = await fetch('/api/ai-recommend', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(stockData),
       });
       const data = await res.json();
@@ -1235,7 +1239,11 @@ function NewsTab() {
   const podcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    fetch('/api/news-enhanced')
+    const headers: Record<string, string> = {};
+    const newsApiKey = localStorage.getItem('news_api_key');
+    if (newsApiKey) headers['X-News-Api-Key'] = newsApiKey;
+
+    fetch('/api/news-enhanced', { headers })
       .then(r => r.json())
       .then(d => setNews(d.news ?? []))
       .catch(() => {})
@@ -1247,9 +1255,13 @@ function NewsTab() {
     setAnalyses(prev => ({ ...prev, [item.id]: 'loading' }));
     try {
       const descriptionToUse = item.fullContent || item.description;
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const apiKey = localStorage.getItem('openrouter_key');
+      if (apiKey) headers['X-OpenRouter-Key'] = apiKey;
+
       const res = await fetch('/api/news/analyze', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ title: item.title, description: descriptionToUse }),
       });
       const data = await res.json();
@@ -1327,7 +1339,11 @@ function NewsTab() {
             setLoading(true);
             setNews([]);
             setAnalyses({});
-            fetch('/api/news-enhanced')
+            const headers: Record<string, string> = {};
+            const newsApiKey = localStorage.getItem('news_api_key');
+            if (newsApiKey) headers['X-News-Api-Key'] = newsApiKey;
+
+            fetch('/api/news-enhanced', { headers })
               .then(r => r.json())
               .then(d => setNews(d.news ?? []))
               .catch(() => {})

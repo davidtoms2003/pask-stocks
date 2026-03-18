@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
-  const apiKey = process.env.OPEN_ROUTER_API_KEY;
+  const clientKey = request.headers.get('X-OpenRouter-Key');
+  const apiKey = clientKey || process.env.OPEN_ROUTER_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'OPEN_ROUTER_API_KEY no configurada.' }, { status: 500 });
   }

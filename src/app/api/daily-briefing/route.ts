@@ -69,12 +69,12 @@ interface NewsItem {
   publishedAt: string;
 }
 
-async function fetchAllFinancialNews(): Promise<NewsItem[]> {
+async function fetchAllFinancialNews(apiKey: string): Promise<NewsItem[]> {
   const all: NewsItem[] = [];
 
   // 1. NewsAPI — financial queries (últimas 48 horas para frescura garantizada)
   const from = new Date(Date.now() - 48 * 3_600_000).toISOString().slice(0, 10);
-  if (NEWS_API_KEY) {
+  if (apiKey) {
     const queries = [
       { q: '"stock market" OR "Wall Street" OR earnings OR "S&P 500" OR "Federal Reserve" OR inflation', category: 'markets' },
       { q: '"trade war" OR "central bank" OR "interest rates" OR recession OR tariffs OR GDP', category: 'macro' },
@@ -82,7 +82,7 @@ async function fetchAllFinancialNews(): Promise<NewsItem[]> {
     ];
     await Promise.all(queries.map(async ({ q, category }) => {
       try {
-        const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&from=${from}&pageSize=20&apiKey=${NEWS_API_KEY}`;
+        const url = `https://newsapi.org/v2/everything?q=${encodeURIComponent(q)}&language=en&sortBy=publishedAt&from=${from}&pageSize=20&apiKey=${apiKey}`;
         const res = await fetch(url, { signal: AbortSignal.timeout(10000) });
         if (!res.ok) return;
         const data = await res.json() as { articles: { title: string; description: string | null; content: string | null; url: string; source: { name: string }; publishedAt: string }[] };
@@ -196,6 +196,9 @@ export async function POST(request: NextRequest) {
 // ─── GET: legacy cached briefing ──────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  const clientNewsKey = request.headers.get('X-News-Api-Key');
+  const newsApiKey = clientNewsKey || process.env.NEWS_API_KEY || '';
+  
   const today = todayStr();
   const slot  = getCurrentSlot();
   const formattedDate = formatDate(today);
@@ -215,7 +218,7 @@ export async function GET(request: NextRequest) {
   }
 
   // Fetch fresh news
-  const news = await fetchAllFinancialNews();
+  const news = await fetchAllFinancialNews(newsApiKey);
   const urls = news.map(n => n.url).filter(Boolean);
 
   // Call Python backend for briefing + notebook refresh
