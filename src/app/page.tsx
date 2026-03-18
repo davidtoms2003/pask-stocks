@@ -217,7 +217,7 @@ function AnalyzeTab() {
   const [aiExplanation, setAiExplanation] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
 
-  const fetchAi = async (stockData: StockResult) => {
+  const fetchAi = async (stockData: StockResult, finnhubInfo: FinnhubData | null) => {
     setAiLoading(true);
     setAiSignal(null);
     setAiExplanation(null);
@@ -229,7 +229,7 @@ function AnalyzeTab() {
       const res = await fetch('/api/ai-recommend', {
         method: 'POST',
         headers,
-        body: JSON.stringify(stockData),
+        body: JSON.stringify({ ...stockData, finnhubData: finnhubInfo }),
       });
       const data = await res.json();
       if (data.signal && data.explanation) {
@@ -242,20 +242,6 @@ function AnalyzeTab() {
       setAiExplanation('No se pudo conectar con el servicio de IA.');
     } finally {
       setAiLoading(false);
-    }
-  };
-
-  const fetchFinnhub = async (ticker: string) => {
-    try {
-      const res = await fetch(`/api/finnhub?ticker=${ticker}`);
-      if (res.ok) {
-        const data = await res.json();
-        setFinnhubData(data);
-      } else {
-        setFinnhubData(null);
-      }
-    } catch {
-      setFinnhubData(null);
     }
   };
 
@@ -277,10 +263,32 @@ function AnalyzeTab() {
       if (!res.ok) {
         setError(data.error ?? 'Error desconocido.');
       } else {
-        setResult(data as StockResult);
-        // Start parallel fetches
-        fetchAi(data as StockResult);
-        fetchFinnhub(t);
+        const stockResult = data as StockResult;
+        setResult(stockResult);
+        
+        // Fetch Finnhub data first, then pass both to AI
+        const finnhubApiKey = localStorage.getItem('finnhub_api_key');
+        const headers: HeadersInit = {};
+        if (finnhubApiKey) {
+          headers['x-finnhub-api-key'] = finnhubApiKey;
+        }
+        
+        try {
+          const finnhubRes = await fetch(`/api/finnhub?ticker=${t}`, { headers });
+          if (finnhubRes.ok) {
+            const finnhubInfo = await finnhubRes.json();
+            setFinnhubData(finnhubInfo);
+            // Pass both stock data and finnhub data to AI
+            fetchAi(stockResult, finnhubInfo);
+          } else {
+            setFinnhubData(null);
+            // Still fetch AI without finnhub data
+            fetchAi(stockResult, null);
+          }
+        } catch {
+          setFinnhubData(null);
+          fetchAi(stockResult, null);
+        }
       }
     } catch {
       setError('Error de conexión. Asegúrate de que el servidor está en marcha.');
@@ -399,76 +407,70 @@ function AnalyzeTab() {
             <IndicatorCard label="RSI (14)" value={result.rsi.toFixed(1)} hint={result.rsi > 70 ? 'Sobrecompra' : result.rsi < 30 ? 'Sobreventa' : 'Zona neutral'} positive={result.rsi >= 40 && result.rsi <= 60} />
           </div>
 
-          {/* Finnhub Data */}
-          {finnhubData && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Analyst Recommendations */}
-              {finnhubData.recommendation && (
-                <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-                  <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-2">Recomendación Analistas</p>
-                  <div className="flex items-center gap-4">
-                    <div className="flex-1 space-y-1">
-                      <div className="flex justify-between text-xs text-gray-400">
-                        <span>Compra</span>
-                        <span className="text-emerald-400">{finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy}</span>
-                      </div>
-                      <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                        <div 
-                          className="bg-emerald-500 h-full" 
-                          style={{ width: `${((finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }} 
-                        />
-                      </div>
-                    </div>
-                    <div className="flex-1 space-y-1">
-                       <div className="flex justify-between text-xs text-gray-400">
-                        <span>Mantener</span>
-                        <span className="text-amber-400">{finnhubData.recommendation.hold}</span>
-                      </div>
-                      <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                        <div 
-                           className="bg-amber-500 h-full"
-                           style={{ width: `${(finnhubData.recommendation.hold / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="flex-1 space-y-1">
-                       <div className="flex justify-between text-xs text-gray-400">
-                        <span>Venta</span>
-                        <span className="text-red-400">{finnhubData.recommendation.sell + finnhubData.recommendation.strongSell}</span>
-                      </div>
-                      <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
-                         <div 
-                           className="bg-red-500 h-full"
-                           style={{ width: `${((finnhubData.recommendation.sell + finnhubData.recommendation.strongSell) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
-                         />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* News Sentiment */}
-              {finnhubData.sentiment && finnhubData.sentiment.sentiment && (
-                 <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
-                  <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-2">Sentimiento Noticias</p>
-                  <div className="flex items-center justify-between">
-                     <div className="text-center">
-                        <span className="block text-2xl font-bold text-emerald-400">{(finnhubData.sentiment.sentiment.bullishPercent * 100).toFixed(0)}%</span>
-                        <span className="text-xs text-gray-400">Bullish</span>
-                     </div>
-                     <div className="h-8 w-px bg-gray-800" />
-                     <div className="text-center">
-                        <span className="block text-2xl font-bold text-red-400">{(finnhubData.sentiment.sentiment.bearishPercent * 100).toFixed(0)}%</span>
-                        <span className="text-xs text-gray-400">Bearish</span>
-                     </div>
-                      <div className="h-8 w-px bg-gray-800" />
+          {/* Finnhub Data - Market Intelligence */}
+          {finnhubData && (finnhubData.recommendation || (finnhubData.sentiment && finnhubData.sentiment.sentiment)) && (
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Analyst Recommendations */}
+                {finnhubData.recommendation && (
+                  <div>
+                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Recomendaciones de Analistas</p>
+                    <div className="grid grid-cols-3 gap-3 mb-3">
                       <div className="text-center">
-                         <span className="block text-2xl font-bold text-blue-400">{finnhubData.sentiment.buzz?.articlesInLastWeek ?? 0}</span>
-                         <span className="text-xs text-gray-400">Artículos</span>
+                        <div className="text-2xl font-bold text-emerald-400">{finnhubData.recommendation.strongBuy + finnhubData.recommendation.buy}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Compra</div>
                       </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-amber-400">{finnhubData.recommendation.hold}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Mantener</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-red-400">{finnhubData.recommendation.strongSell + finnhubData.recommendation.sell}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Venta</div>
+                      </div>
+                    </div>
+                    <div className="flex gap-1 h-2 rounded-full overflow-hidden bg-gray-800">
+                      <div 
+                        className="bg-emerald-500"
+                        style={{ width: `${((finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                      />
+                      <div 
+                        className="bg-amber-500"
+                        style={{ width: `${(finnhubData.recommendation.hold / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                      />
+                      <div 
+                        className="bg-red-500"
+                        style={{ width: `${((finnhubData.recommendation.sell + finnhubData.recommendation.strongSell) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                      />
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                {/* News Sentiment & Market Metrics */}
+                {finnhubData.sentiment && finnhubData.sentiment.sentiment && (
+                  <div>
+                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Sentimiento de Mercado</p>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-emerald-400">{(finnhubData.sentiment.sentiment.bullishPercent * 100).toFixed(0)}%</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Bullish</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-red-400">{(finnhubData.sentiment.sentiment.bearishPercent * 100).toFixed(0)}%</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Bearish</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-blue-400">{finnhubData.sentiment.buzz?.articlesInLastWeek ?? 0}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Artículos</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-purple-400">{finnhubData.sentiment.companyNewsScore?.toFixed(1) ?? 'N/A'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">News Score</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

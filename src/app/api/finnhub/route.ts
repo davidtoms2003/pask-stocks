@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(req: NextRequest) {
   const ticker = req.nextUrl.searchParams.get('ticker');
-  const apiKey = process.env.FINNHUB_API_KEY;
+  // Try to get API key from request header first, fallback to env variable
+  const apiKey = req.headers.get('x-finnhub-api-key') || process.env.FINNHUB_API_KEY;
 
   if (!ticker) {
     return NextResponse.json({ error: 'Ticker is required' }, { status: 400 });
@@ -10,7 +11,7 @@ export async function GET(req: NextRequest) {
 
   // Si no hay key, devolvemos null sin error para no romper la UI
   if (!apiKey) {
-    console.warn('FINNHUB_API_KEY not found in environment variables');
+    console.warn('FINNHUB_API_KEY not found (neither in request header nor environment variables)');
     return NextResponse.json({ recommendation: null, sentiment: null });
   }
 

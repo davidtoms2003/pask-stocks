@@ -6,6 +6,7 @@ import Link from 'next/link';
 export default function SettingsPage() {
   const [openRouterKey, setOpenRouterKey] = useState('');
   const [newsApiKey, setNewsApiKey] = useState('');
+  const [finnhubApiKey, setFinnhubApiKey] = useState('');
   const [notebookCookies, setNotebookCookies] = useState('');
   const [status, setStatus] = useState<{ type: 'success' | 'error' | ''; message: string }>({ type: '', message: '' });
   const [loading, setLoading] = useState(false);
@@ -17,6 +18,9 @@ export default function SettingsPage() {
 
     const savedNewsKey = localStorage.getItem('news_api_key');
     if (savedNewsKey) setNewsApiKey(savedNewsKey);
+
+    const savedFinnhubKey = localStorage.getItem('finnhub_api_key');
+    if (savedFinnhubKey) setFinnhubApiKey(savedFinnhubKey);
   }, []);
 
   const handleSaveOpenRouter = () => {
@@ -44,6 +48,22 @@ export default function SettingsPage() {
       } else {
         localStorage.setItem('news_api_key', newsApiKey.trim());
         setStatus({ type: 'success', message: 'NewsAPI Key guardada en el navegador.' });
+      }
+      window.dispatchEvent(new Event('storage'));
+      setTimeout(() => setStatus({ type: '', message: '' }), 3000);
+    } catch (e) {
+      setStatus({ type: 'error', message: 'Error al guardar la API Key.' });
+    }
+  };
+
+  const handleSaveFinnhubApi = () => {
+    try {
+      if (!finnhubApiKey.trim()) {
+        localStorage.removeItem('finnhub_api_key');
+        setStatus({ type: 'success', message: 'Finnhub API Key eliminada.' });
+      } else {
+        localStorage.setItem('finnhub_api_key', finnhubApiKey.trim());
+        setStatus({ type: 'success', message: 'Finnhub API Key guardada en el navegador.' });
       }
       window.dispatchEvent(new Event('storage'));
       setTimeout(() => setStatus({ type: '', message: '' }), 3000);
@@ -200,6 +220,40 @@ export default function SettingsPage() {
           />
         </section>
 
+        {/* Finnhub Configuration */}
+        <section className="bg-neutral-900/50 p-6 rounded-xl border border-neutral-800 space-y-4">
+          <h2 className="text-xl font-semibold text-purple-400 flex items-center gap-2">
+            📊 Finnhub API
+          </h2>
+          <p className="text-sm text-neutral-400">
+            Opcional. Introduce tu API Key de <a href="https://finnhub.io" target="_blank" rel="noopener noreferrer" className="text-purple-400 hover:underline">finnhub.io</a> para obtener recomendaciones de analistas y análisis de sentimiento de mercado en tiempo real.
+          </p>
+          <div className="space-y-2">
+            <label className="block text-xs font-medium text-neutral-500 uppercase">API Key</label>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                value={finnhubApiKey}
+                onChange={(e) => setFinnhubApiKey(e.target.value)}
+                placeholder="..."
+                className="w-full bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-purple-500 transition-colors font-mono"
+              />
+              <button
+                onClick={handleSaveFinnhubApi}
+                className="px-4 bg-neutral-800 hover:bg-purple-600 hover:text-white text-neutral-300 rounded-lg transition-all text-sm font-medium whitespace-nowrap"
+              >
+                Guardar
+              </button>
+            </div>
+          </div>
+          <SavedKeyList 
+            storageKey="finnhub_api_key" 
+            label="Finnhub API Key" 
+            colorClass="purple" 
+            onDelete={() => setFinnhubApiKey('')}
+          />
+        </section>
+
         {/* NotebookLM Configuration */}
         <section className="bg-neutral-900/50 p-6 rounded-xl border border-neutral-800 space-y-4">
           <h2 className="text-xl font-semibold text-blue-400 flex items-center gap-2">
@@ -283,12 +337,14 @@ function SavedKeyList({ storageKey, label, colorClass, onDelete }: { storageKey:
     emerald: 'text-emerald-400 bg-emerald-900/10',
     orange: 'text-orange-400 bg-orange-900/10',
     blue: 'text-blue-400 bg-blue-900/10',
+    purple: 'text-purple-400 bg-purple-900/10',
   };
   
   const btnHoverMap: Record<string, string> = {
     emerald: 'text-emerald-200/50 hover:text-red-400',
     orange: 'text-orange-200/50 hover:text-red-400',
     blue: 'text-blue-200/50 hover:text-red-400',
+    purple: 'text-purple-200/50 hover:text-red-400',
   };
 
   return (
