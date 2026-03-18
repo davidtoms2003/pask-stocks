@@ -21,6 +21,7 @@
 *.pem
 .news-cache.json
 .briefing-cache.json
+backend/auth_cookies.json
 __pycache__/
 *.pyc
 
