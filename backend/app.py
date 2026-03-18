@@ -167,7 +167,9 @@ async def get_notebooks():
             })
         return {"success": True, "notebooks": result}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
 
 @app.post("/api/ask_pask_stocks")
 async def ask_pask_stocks(request: AskRequest):

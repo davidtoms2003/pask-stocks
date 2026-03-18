@@ -307,8 +307,9 @@ function SavedNotebookStatus({ onDelete }: { onDelete: () => void }) {
     };
     
     // Check again after a short delay (e.g. after adding credentials)
-    const interval = setInterval(check, 2000);
-    return () => clearInterval(interval);
+    // Removed polling to avoid log noise
+    // const interval = setInterval(check, 2000);
+    // return () => clearInterval(interval);
   }, []);
 
   if (!configured) return null;
