@@ -103,6 +103,7 @@ export default function SettingsPage() {
       const result = await response.json();
       setStatus({ type: 'success', message: `Conexión a NotebookLM configurada: ${result.message}` });
       setNotebookCookies(''); // Limpiar por seguridad
+      window.dispatchEvent(new Event('notebooklm-config-changed'));
     } catch (e: any) {
       setStatus({ type: 'error', message: e.message || 'Error desconocido' });
     } finally {
@@ -292,24 +293,20 @@ function SavedNotebookStatus({ onDelete }: { onDelete: () => void }) {
   const [configured, setConfigured] = useState(false);
 
   useEffect(() => {
-    // Check status on mount
-    fetch('http://localhost:8000/api/config/notebooklm/status')
-      .then(r => r.json())
-      .then(d => setConfigured(d.configured))
-      .catch(() => setConfigured(false));
-    
-    // Listen for storage/window events to re-check
+    // Check status function
     const check = () => {
          fetch('http://localhost:8000/api/config/notebooklm/status')
             .then(r => r.json())
             .then(d => setConfigured(d.configured))
-            .catch(() => {});
+            .catch(() => setConfigured(false));
     };
+
+    // Initial check
+    check();
     
-    // Check again after a short delay (e.g. after adding credentials)
-    // Removed polling to avoid log noise
-    // const interval = setInterval(check, 2000);
-    // return () => clearInterval(interval);
+    // Listen for custom event to re-check after save
+    window.addEventListener('notebooklm-config-changed', check);
+    return () => window.removeEventListener('notebooklm-config-changed', check);
   }, []);
 
   if (!configured) return null;
