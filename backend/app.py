@@ -47,6 +47,7 @@ class ChatAgentRequest(BaseModel):
     stock_context: str = ""
     history: list[dict] = []
     notebook_id: str | None = None
+    add_stock_context: bool = False
 
 class NotebookLMConfigRequest(BaseModel):
     cookies: list[dict] | dict[str, str]
@@ -183,7 +184,7 @@ async def ask_pask_stocks(request: AskRequest):
 @app.post("/api/chat_agent")
 async def chat_agent(request: ChatAgentRequest):
     try:
-        result = await run_agent(request.question, request.history, request.stock_context, request.notebook_id)
+        result = await run_agent(request.question, request.history, request.stock_context, request.notebook_id, request.add_stock_context)
         return {"success": True, **result}
     except Exception as e:
         import traceback

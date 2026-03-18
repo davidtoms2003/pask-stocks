@@ -348,7 +348,7 @@ async def _resolve_notebook_id(notebook_id: str | None) -> str:
 
 # ─── Agente principal ─────────────────────────────────────────────────────────
 
-async def run_agent(question: str, history: list[dict], stock_context: str = "", notebook_id: str | None = None) -> dict:
+async def run_agent(question: str, history: list[dict], stock_context: str = "", notebook_id: str | None = None, add_stock_context: bool = False) -> dict:
     """
     Flujo:
     1. Expandir comando si aplica (/dcf, /earnings, etc.)
@@ -365,6 +365,9 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
     # Determinar búsquedas según el comando
     q_lower = question.strip().lower()
     search_queries: list[str] = []
+    
+    # Lista de comandos que SÍ requieren búsqueda activa
+    # (Los financieros definidos en COMMAND_SEARCHES)
     for cmd, templates in COMMAND_SEARCHES.items():
         if q_lower.startswith(cmd):
             search_queries = [
@@ -372,9 +375,18 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
                 for t in templates
             ]
             break
-
-    if not search_queries and ticker and len(question.strip()) > 10:
-        search_queries = [f"{ticker} {name} {question.strip()[:60]}"]
+            
+    # OTROS comandos que requieren búsqueda explícita
+    # Si el usuario pide explícitamente "busca noticias de X" o similar, lo detectamos aquí
+    if not search_queries:
+        explicit_keywords = ["busca", "buscar", "investiga", "noticias", "news", "search", "find", "fuentes"]
+        # Solo si la pregunta es lo suficientemente larga para ser una query válida
+        if any(k in q_lower for k in explicit_keywords) and len(question.strip()) > 5:
+             query_term = question.strip()
+             # Si tenemos ticker, lo incluimos para dar contexto
+             if ticker and ticker.lower() not in q_lower:
+                 query_term = f"{ticker} {query_term}"
+             search_queries = [query_term]
 
     # Ejecutar búsquedas
     search_snippets, found_urls = await _run_searches(search_queries, actions)
@@ -406,8 +418,11 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
     # ─── AÑADIR FUENTE DE TEXTO (CONTEXTO INMEDIATO) ──────────────────────────
     # Siempre útil por si las webs tienen paywall o tardan en procesarse
     context_content = ""
-    if stock_context:
+    
+    # Sólo añadir stock_context si se ha pedido explícitamente (inicio de sesión/stock)
+    if add_stock_context and stock_context:
         context_content += f"DATOS DE LA ACCIÓN ({ticker}):\n{stock_context}\n\n"
+        
     if search_snippets:
         context_content += f"RESUMEN DE BÚSQUEDA ({ticker}):\n{search_snippets}\n\n"
 
@@ -424,8 +439,8 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
             source_added = True
         except Exception as e:
             print(f"Error añadiendo fuente de texto: {e}")
-            # Fallback al prompt si falla
-            if stock_context: parts.append(f"DATOS DE LA ACCIÓN:\n{stock_context}")
+            # Fallback al prompt si falla, pero solo si tocaba añadirlo
+            if add_stock_context and stock_context: parts.append(f"DATOS DE LA ACCIÓN:\n{stock_context}")
             if search_snippets: parts.append(f"RESUMEN BÚSQUEDA:\n{search_snippets}")
 
     # ─── CONSTRUIR MENSAJE ────────────────────────────────────────────────────

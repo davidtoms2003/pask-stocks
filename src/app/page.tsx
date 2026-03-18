@@ -477,8 +477,12 @@ function ChatTab() {
     }
   };
 
+  const [contextSent, setContextSent] = useState(false);
+
+  // When stock changes, reset context sent flag
   const applyStockChange = (s: Suggestion) => {
     setSelectedStock(s);
+    setContextSent(false); // Reset context flag
     ac.setQuery(s.ticker);
     ac.setSuggestions([]);
     ac.setShowDropdown(false);
@@ -514,12 +518,27 @@ function ChatTab() {
     // Send only user/assistant messages (no actions metadata) as history
     const history = messages.map(m => ({ role: m.role, content: m.content }));
 
+    // Decide whether to send stock context
+    // Send if we have stock info AND it hasn't been sent yet for this stock session
+    const shouldAddContext = !!stockInfo && !contextSent;
+    
+    // If user explicitly asks for context refresh, we could allow it, but for now stick to "once per session"
+    
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockInfo, question: q, history, notebook_id: selectedNotebook?.id ?? null }),
+        body: JSON.stringify({ 
+          stockInfo, 
+          question: q, 
+          history, 
+          notebook_id: selectedNotebook?.id ?? null,
+          add_stock_context: shouldAddContext
+        }),
       });
+      
+      if (shouldAddContext) setContextSent(true);
+
       const data = await res.json();
       const answer = data.answer ?? data.error ?? 'Sin respuesta.';
       const actions: AgentAction[] = data.actions ?? [];
