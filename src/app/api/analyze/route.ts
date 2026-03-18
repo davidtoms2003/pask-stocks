@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import YahooFinance from 'yahoo-finance2';
-const yahooFinance = new YahooFinance();
+const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 import { calculateMA, calculateRSI } from '@/lib/indicators';
 import { getRecommendation } from '@/lib/recommendation';
 import { getMockPrices } from '@/lib/mockData';

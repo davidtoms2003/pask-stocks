@@ -205,30 +205,48 @@ export default function SettingsPage() {
           <h2 className="text-xl font-semibold text-blue-400 flex items-center gap-2">
             📓 NotebookLM Conexión
           </h2>
-          <p className="text-sm text-neutral-400">
-            Para conectar con tus cuadernos privados, necesitamos las cookies de sesión de Google.
-            Usa la extensión <a href="https://chromewebstore.google.com/detail/editthiscookie/fngmhnnpilhplaeedifhccceomclgfbg" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">EditThisCookie</a> en notebooklm.google.com, copia las cookies al portapapeles (botón "exportar") y pégalas aquí.
-          </p>
-          <div className="space-y-2">
-            <label className="block text-xs font-medium text-neutral-500 uppercase">Cookies JSON</label>
-            <textarea
-              value={notebookCookies}
-              onChange={(e) => setNotebookCookies(e.target.value)}
-              placeholder='Pegar aquí el JSON copiado de EditThisCookie...'
-              className="w-full h-32 bg-neutral-950 border border-neutral-800 rounded-lg px-4 py-3 text-white focus:outline-none focus:border-blue-500 transition-colors font-mono text-xs"
-            />
-          </div>
-          <button
-            onClick={handleSaveNotebookLM}
-            disabled={loading}
-            className="px-4 py-2 bg-neutral-800 hover:bg-blue-600 hover:text-white text-neutral-300 rounded-lg transition-all text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? 'Conectando...' : 'Conectar NotebookLM'}
-          </button>
           
+          <div className="bg-blue-900/20 border border-blue-500/30 rounded-lg p-4 space-y-3">
+            <p className="text-sm text-blue-200 font-medium">✨ Método de autenticación mejorado</p>
+            <p className="text-sm text-neutral-300">
+              Para una autenticación persistente que no expire, ejecuta este comando una sola vez desde la terminal en la raíz del proyecto:
+            </p>
+            <div className="bg-neutral-950 border border-neutral-700 rounded px-3 py-2 font-mono text-xs text-emerald-400">
+              python3 backend/setup_notebooklm.py
+            </div>
+            <p className="text-xs text-neutral-400">
+              Esto abrirá tu navegador para iniciar sesión en Google. Las credenciales se guardarán de forma segura y no expirarán.
+            </p>
+          </div>
+
           <SavedNotebookStatus onDelete={() => {
-              setStatus({ type: 'success', message: 'Configuración de NotebookLM eliminada del backend.' });
+              setStatus({ type: 'success', message: 'Configuración de NotebookLM verificada.' });
           }} />
+          
+          <details className="text-xs text-neutral-500">
+            <summary className="cursor-pointer hover:text-neutral-300 transition-colors">Método alternativo (no recomendado)</summary>
+            <div className="mt-3 space-y-3 pl-4 border-l-2 border-neutral-800">
+              <p className="text-neutral-400">
+                Si prefieres el método manual con cookies (expiran frecuentemente):
+              </p>
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-neutral-500 uppercase">Cookies JSON</label>
+                <textarea
+                  value={notebookCookies}
+                  onChange={(e) => setNotebookCookies(e.target.value)}
+                  placeholder='Pegar aquí el JSON de EditThisCookie...'
+                  className="w-full h-24 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500 transition-colors font-mono text-xs"
+                />
+              </div>
+              <button
+                onClick={handleSaveNotebookLM}
+                disabled={loading}
+                className="px-3 py-1.5 bg-neutral-800 hover:bg-blue-600 hover:text-white text-neutral-300 rounded-lg transition-all text-xs font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? 'Conectando...' : 'Conectar (Método Antiguo)'}
+              </button>
+            </div>
+          </details>
         </section>
 
         <div className="text-center text-xs text-neutral-600 pt-8">
@@ -290,15 +308,15 @@ function SavedKeyList({ storageKey, label, colorClass, onDelete }: { storageKey:
 }
 
 function SavedNotebookStatus({ onDelete }: { onDelete: () => void }) {
-  const [configured, setConfigured] = useState(false);
+  const [status, setStatus] = useState<{ configured: boolean; method?: string; message?: string }>({ configured: false });
 
   useEffect(() => {
     // Check status function
     const check = () => {
          fetch('http://localhost:8000/api/config/notebooklm/status')
             .then(r => r.json())
-            .then(d => setConfigured(d.configured))
-            .catch(() => setConfigured(false));
+            .then(d => setStatus(d))
+            .catch(() => setStatus({ configured: false }));
     };
 
     // Initial check
@@ -306,28 +324,27 @@ function SavedNotebookStatus({ onDelete }: { onDelete: () => void }) {
     
     // Listen for custom event to re-check after save
     window.addEventListener('notebooklm-config-changed', check);
-    return () => window.removeEventListener('notebooklm-config-changed', check);
+    // Also check periodically
+    const interval = setInterval(check, 10000);
+    return () => {
+      window.removeEventListener('notebooklm-config-changed', check);
+      clearInterval(interval);
+    };
   }, []);
 
-  if (!configured) return null;
+  if (!status.configured) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-amber-400 bg-amber-900/10 py-2 px-3 rounded border border-amber-500/20">
+        <span>⚠️</span>
+        <span>{status.message || 'NotebookLM no configurado'}</span>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex items-center gap-2 mt-2 text-xs text-blue-400 bg-blue-900/10 py-1 px-2 rounded w-fit">
-      <span>✓ NotebookLM Conectado</span>
-      <button 
-        onClick={async () => {
-          try {
-            await fetch('http://localhost:8000/api/config/notebooklm', { method: 'DELETE' });
-            setConfigured(false);
-            onDelete();
-          } catch(e) {
-            console.error(e);
-          }
-        }}
-        className="text-blue-200/50 hover:text-red-400 ml-2"
-      >
-        (Desconectar)
-      </button>
+    <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-900/10 py-2 px-3 rounded border border-emerald-500/20">
+      <span>✓</span>
+      <span>{status.method === 'persistent' ? 'NotebookLM conectado (autenticación persistente)' : 'NotebookLM conectado'}</span>
     </div>
   );
 }

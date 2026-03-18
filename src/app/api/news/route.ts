@@ -89,7 +89,7 @@ async function fetchYahooNews(): Promise<NewsItem[]> {
       title: n.title,
       url: n.link,
       source: n.publisher ?? 'Yahoo Finance',
-      publishedAt: new Date((n.providerPublishTime ?? 0) * 1000).toISOString(),
+      publishedAt: new Date((Number(n.providerPublishTime) || 0) * 1000).toISOString(),
       description: '',
       thumbnail: (n as { thumbnail?: { resolutions?: { url: string }[] } }).thumbnail
         ?.resolutions?.[0]?.url,

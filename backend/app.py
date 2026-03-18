@@ -149,8 +149,26 @@ async def delete_notebooklm_config():
 
 @app.get("/api/config/notebooklm/status")
 async def get_notebooklm_status():
-    auth_path = Path("auth_cookies.json")
-    return {"configured": auth_path.exists()}
+    """Check if NotebookLM authentication is working."""
+    try:
+        # Try to connect and get notebooks to verify authentication
+        notebooks = await notebooklm_service.get_notebooks()
+        return {
+            "configured": True, 
+            "method": "persistent",
+            "message": f"Connected successfully with {len(notebooks)} notebooks"
+        }
+    except Exception as e:
+        error_msg = str(e)
+        if "Authentication expired" in error_msg or "re-authenticate" in error_msg:
+            return {
+                "configured": False,
+                "message": "Authentication expired. Run: python3 backend/setup_notebooklm.py"
+            }
+        return {
+            "configured": False,
+            "message": f"Connection failed: {error_msg}"
+        }
 
 @app.get("/api/notebooks")
 async def get_notebooks():
@@ -216,6 +234,22 @@ async def add_sources(request: AddSourcesRequest):
     try:
         result = await notebooklm_service.add_news_sources(request.urls)
         return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/upload_context")
+async def upload_context(request: ChatAgentRequest):
+    """Upload stock context to NotebookLM without generating chat response."""
+    try:
+        # Use run_agent with an empty question to just upload context
+        result = await run_agent(
+            question="", 
+            history=[], 
+            stock_context=request.stock_context,
+            notebook_id=request.notebook_id,
+            add_stock_context=True
+        )
+        return {"success": True, "message": "Context uploaded successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -25,6 +25,10 @@ class NotebookLMService:
     async def _get_client(self):
         return await get_notebook_client()
 
+    async def use_client(self):
+        """Async context manager para obtener un cliente. Uso: async with await service.use_client() as client:"""
+        return await self._get_client()
+
     async def _get_pask_notebook_id(self, client) -> str:
         """Obtiene el ID del notebook PASK stocks, lanzando error si no existe."""
         notebooks = await client.notebooks.list()

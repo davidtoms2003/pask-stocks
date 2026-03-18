@@ -2,10 +2,24 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { StockResult, Signal } from '@/types/stock';
+import { StockResult, Signal, FinnhubData } from '@/types/stock';
 import { StockInfo } from '@/app/api/stock-info/route';
 import type { NewsItem } from '@/app/api/news/route';
 import type { EnhancedNewsItem, NewsAnalysis } from '@/types/news';
+import {
+  getCachedBriefing,
+  saveBriefingCache,
+  updateBriefingCache,
+  getCachedPodcast,
+  savePodcastCache,
+  updatePodcastStatus,
+  startPodcastPolling,
+  subscribeToPodcastUpdates,
+  restorePodcastPollingIfNeeded,
+  startBriefingPolling,
+  subscribeToBriefingUpdates,
+  restoreBriefingPollingIfNeeded,
+} from '@/lib/briefing-cache';
 
 // ─── Signal config ────────────────────────────────────────────────────────────
 
@@ -196,6 +210,7 @@ function AnalyzeTab() {
   const ac = useAutocomplete();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<StockResult | null>(null);
+  const [finnhubData, setFinnhubData] = useState<FinnhubData | null>(null);
   const [companyName, setCompanyName] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [aiSignal, setAiSignal] = useState<Signal | null>(null);
@@ -230,12 +245,27 @@ function AnalyzeTab() {
     }
   };
 
+  const fetchFinnhub = async (ticker: string) => {
+    try {
+      const res = await fetch(`/api/finnhub?ticker=${ticker}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFinnhubData(data);
+      } else {
+        setFinnhubData(null);
+      }
+    } catch {
+      setFinnhubData(null);
+    }
+  };
+
   const analyze = async (symbol: string, name?: string) => {
     const t = symbol.trim().toUpperCase();
     if (!t) return;
     setLoading(true);
     setError(null);
     setResult(null);
+    setFinnhubData(null);
     setAiSignal(null);
     setAiExplanation(null);
     setCompanyName(name ?? null);
@@ -248,7 +278,9 @@ function AnalyzeTab() {
         setError(data.error ?? 'Error desconocido.');
       } else {
         setResult(data as StockResult);
+        // Start parallel fetches
         fetchAi(data as StockResult);
+        fetchFinnhub(t);
       }
     } catch {
       setError('Error de conexión. Asegúrate de que el servidor está en marcha.');
@@ -367,6 +399,79 @@ function AnalyzeTab() {
             <IndicatorCard label="RSI (14)" value={result.rsi.toFixed(1)} hint={result.rsi > 70 ? 'Sobrecompra' : result.rsi < 30 ? 'Sobreventa' : 'Zona neutral'} positive={result.rsi >= 40 && result.rsi <= 60} />
           </div>
 
+          {/* Finnhub Data */}
+          {finnhubData && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {/* Analyst Recommendations */}
+              {finnhubData.recommendation && (
+                <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                  <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-2">Recomendación Analistas</p>
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1 space-y-1">
+                      <div className="flex justify-between text-xs text-gray-400">
+                        <span>Compra</span>
+                        <span className="text-emerald-400">{finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy}</span>
+                      </div>
+                      <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          className="bg-emerald-500 h-full" 
+                          style={{ width: `${((finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }} 
+                        />
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-1">
+                       <div className="flex justify-between text-xs text-gray-400">
+                        <span>Mantener</span>
+                        <span className="text-amber-400">{finnhubData.recommendation.hold}</span>
+                      </div>
+                      <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                           className="bg-amber-500 h-full"
+                           style={{ width: `${(finnhubData.recommendation.hold / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex-1 space-y-1">
+                       <div className="flex justify-between text-xs text-gray-400">
+                        <span>Venta</span>
+                        <span className="text-red-400">{finnhubData.recommendation.sell + finnhubData.recommendation.strongSell}</span>
+                      </div>
+                      <div className="w-full bg-gray-800 h-1.5 rounded-full overflow-hidden">
+                         <div 
+                           className="bg-red-500 h-full"
+                           style={{ width: `${((finnhubData.recommendation.sell + finnhubData.recommendation.strongSell) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                         />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* News Sentiment */}
+              {finnhubData.sentiment && finnhubData.sentiment.sentiment && (
+                 <div className="bg-gray-900 border border-gray-800 rounded-2xl p-4">
+                  <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-2">Sentimiento Noticias</p>
+                  <div className="flex items-center justify-between">
+                     <div className="text-center">
+                        <span className="block text-2xl font-bold text-emerald-400">{(finnhubData.sentiment.sentiment.bullishPercent * 100).toFixed(0)}%</span>
+                        <span className="text-xs text-gray-400">Bullish</span>
+                     </div>
+                     <div className="h-8 w-px bg-gray-800" />
+                     <div className="text-center">
+                        <span className="block text-2xl font-bold text-red-400">{(finnhubData.sentiment.sentiment.bearishPercent * 100).toFixed(0)}%</span>
+                        <span className="text-xs text-gray-400">Bearish</span>
+                     </div>
+                      <div className="h-8 w-px bg-gray-800" />
+                      <div className="text-center">
+                         <span className="block text-2xl font-bold text-blue-400">{finnhubData.sentiment.buzz?.articlesInLastWeek ?? 0}</span>
+                         <span className="text-xs text-gray-400">Artículos</span>
+                      </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Recommendation */}
           <div className={`bg-gray-900 border-2 ${cfg.border} rounded-2xl p-6 shadow-xl ${cfg.glow} transition-colors duration-500`}>
             <div className="flex items-center gap-3 mb-4 flex-wrap">
@@ -478,6 +583,30 @@ function ChatTab() {
   };
 
   const [contextSent, setContextSent] = useState(false);
+  
+  // Upload context effect
+  useEffect(() => {
+    if (stockInfo && !contextSent) {
+       // Call new endpoint to upload context immediately
+       const upload = async () => {
+         try {
+           // We need to construct the context string similar to how /api/chat does it, or modify /api/chat to handle context-only upload.
+           // Since we can't import buildContext easily in client component without duplicating code,
+           // we can use a new param on /api/chat or a new route /api/upload-context that calls the backend.
+           // Let's assume we create /api/upload-context route in Next.js first.
+           await fetch('/api/upload-context', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ stockInfo, notebook_id: selectedNotebook?.id ?? null })
+           });
+           setContextSent(true);
+         } catch(e) {
+           console.error("Failed to upload context", e);
+         }
+       };
+       upload();
+    }
+  }, [stockInfo, contextSent, selectedNotebook]);
 
   // When stock changes, reset context sent flag
   const applyStockChange = (s: Suggestion) => {
@@ -518,12 +647,9 @@ function ChatTab() {
     // Send only user/assistant messages (no actions metadata) as history
     const history = messages.map(m => ({ role: m.role, content: m.content }));
 
-    // Decide whether to send stock context
-    // Send if we have stock info AND it hasn't been sent yet for this stock session
-    const shouldAddContext = !!stockInfo && !contextSent;
-    
-    // If user explicitly asks for context refresh, we could allow it, but for now stick to "once per session"
-    
+    // Context should be already sent by the useEffect, but just in case
+    // const shouldAddContext = !!stockInfo && !contextSent;
+
     try {
       const res = await fetch('/api/chat', {
         method: 'POST',
@@ -533,11 +659,9 @@ function ChatTab() {
           question: q, 
           history, 
           notebook_id: selectedNotebook?.id ?? null,
-          add_stock_context: shouldAddContext
+          add_stock_context: false // Rely on automatic upload
         }),
       });
-      
-      if (shouldAddContext) setContextSent(true);
 
       const data = await res.json();
       const answer = data.answer ?? data.error ?? 'Sin respuesta.';
@@ -683,7 +807,7 @@ function ChatTab() {
                       {m.actions.map((a, i) => (
                         <span key={i} className="text-xs text-gray-500 flex items-center gap-1.5">
                           {a.type === 'search' && <><span>🔍</span><span>Búsqueda: &quot;{a.query}&quot; · {a.count} resultados</span></>}
-                          {a.type === 'source_added' && <><span>📎</span><span className="truncate">Fuente añadida: {a.url}</span></>}
+                          {a.type === 'source_added' && a.url && <><span>📎</span><span className="truncate">Fuente añadida: {a.url}</span></>}
                           {a.type === 'note_created' && <><span>📝</span><span>Nota creada: {a.preview}…</span></>}
                         </span>
                       ))}
@@ -1255,7 +1379,62 @@ function NewsTab() {
   const [podcastJobId, setPodcastJobId] = useState<string | null>(null);
   const [podcastStatus, setPodcastStatus] = useState<'idle' | 'generating' | 'ready' | 'failed'>('idle');
   const [podcastError, setPodcastError] = useState<string | null>(null);
-  const podcastPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Cargar briefing y podcast desde caché al montar
+  useEffect(() => {
+    // Restaurar briefing cacheado de hoy
+    const cachedBriefing = getCachedBriefing();
+    if (cachedBriefing) {
+      if (cachedBriefing.status === 'ready' && cachedBriefing.briefing) {
+        setBriefing(cachedBriefing.briefing);
+        setBriefingAddedUrls(new Set(cachedBriefing.addedUrls));
+        setBriefingFailedUrls(new Set(cachedBriefing.failedUrls));
+        setBriefingTelegramUrls(cachedBriefing.telegramUrls);
+      } else if (cachedBriefing.status === 'generating') {
+        setBriefingLoading(true);
+        restoreBriefingPollingIfNeeded();
+      } else if (cachedBriefing.status === 'failed') {
+        setBriefingError(cachedBriefing.error ?? 'Error desconocido');
+      }
+    }
+
+    // Restaurar estado del podcast cacheado de hoy
+    const cachedPodcast = getCachedPodcast();
+    if (cachedPodcast) {
+      setPodcastJobId(cachedPodcast.jobId);
+      setPodcastStatus(cachedPodcast.status);
+      if (cachedPodcast.error) setPodcastError(cachedPodcast.error);
+      
+      // Si estaba generándose, restaurar el polling
+      if (cachedPodcast.status === 'generating') {
+        restorePodcastPollingIfNeeded();
+      }
+    }
+
+    // Suscribirse a actualizaciones del briefing
+    const unsubscribeBriefing = subscribeToBriefingUpdates((result) => {
+      setBriefingLoading(false);
+      if (result.status === 'ready' && result.briefing) {
+        setBriefing(result.briefing);
+        setBriefingAddedUrls(new Set(result.addedUrls ?? []));
+        setBriefingFailedUrls(new Set(result.failedUrls ?? []));
+        setBriefingTelegramUrls(result.telegramUrls ?? []);
+      } else if (result.status === 'failed') {
+        setBriefingError(result.error ?? 'Error generando el resumen');
+      }
+    });
+
+    // Suscribirse a actualizaciones del podcast
+    const unsubscribePodcast = subscribeToPodcastUpdates((status, error) => {
+      setPodcastStatus(status);
+      if (error) setPodcastError(error);
+    });
+
+    return () => {
+      unsubscribeBriefing();
+      unsubscribePodcast();
+    };
+  }, []);
 
   useEffect(() => {
     const headers: Record<string, string> = {};
@@ -1264,7 +1443,18 @@ function NewsTab() {
 
     fetch('/api/news-enhanced', { headers })
       .then(r => r.json())
-      .then(d => setNews(d.news ?? []))
+      .then(d => {
+        setNews(d.news ?? []);
+        // Si tenemos caché de briefing, restaurar las noticias asociadas
+        const cachedBriefing = getCachedBriefing();
+        if (cachedBriefing && cachedBriefing.status === 'ready' && d.news) {
+          const cachedIds = new Set(cachedBriefing.newsIds);
+          const matchingNews = (d.news as EnhancedNewsItem[]).filter((n: EnhancedNewsItem) => cachedIds.has(n.id));
+          if (matchingNews.length > 0) {
+            setBriefingNews(matchingNews);
+          }
+        }
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
@@ -1298,24 +1488,14 @@ function NewsTab() {
       const d = await res.json();
       if (!res.ok || d.error) throw new Error(d.error ?? 'Error desconocido');
       setPodcastJobId(d.job_id);
-      // Start polling
-      podcastPollRef.current = setInterval(async () => {
-        try {
-          const sr = await fetch(`/api/podcast?job_id=${d.job_id}`);
-          const sd = await sr.json();
-          if (sd.status === 'ready') {
-            setPodcastStatus('ready');
-            if (podcastPollRef.current) clearInterval(podcastPollRef.current);
-          } else if (sd.status === 'failed') {
-            setPodcastStatus('failed');
-            setPodcastError(sd.error ?? 'Error generando el podcast');
-            if (podcastPollRef.current) clearInterval(podcastPollRef.current);
-          }
-        } catch { /* keep polling */ }
-      }, 6000);
+      // Guardar en caché e iniciar polling persistente
+      savePodcastCache({ jobId: d.job_id, status: 'generating' });
+      startPodcastPolling(d.job_id);
     } catch (e) {
       setPodcastStatus('failed');
-      setPodcastError(e instanceof Error ? e.message : 'Error iniciando el podcast');
+      const errorMsg = e instanceof Error ? e.message : 'Error iniciando el podcast';
+      setPodcastError(errorMsg);
+      updatePodcastStatus('failed', errorMsg);
     }
   };
 
@@ -1326,27 +1506,29 @@ function NewsTab() {
     setBriefingLoading(true);
     setBriefingError(null);
     setBriefing(null);
+    setBriefingNews(news);
+    
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       const newsApiKey = localStorage.getItem('news_api_key');
       if (newsApiKey) headers['X-News-Api-Key'] = newsApiKey;
 
-      const res = await fetch('/api/daily-briefing', {
+      // Usar modo async para permitir navegación mientras se genera
+      const res = await fetch('/api/daily-briefing?async=1', {
         method: 'POST',
         headers,
         body: JSON.stringify({ news }),
       });
       const d = await res.json();
       if (!res.ok || d.error) throw new Error(d.error ?? 'Error desconocido');
-      setBriefing(d.briefing);
-      setBriefingNews(news);
-      setBriefingAddedUrls(new Set(d.addedUrls ?? []));
-      setBriefingFailedUrls(new Set(d.failedUrls ?? []));
-      setBriefingTelegramUrls(d.telegramUrls ?? []);
+      
+      // Iniciar polling en background - persiste aunque cambies de página
+      startBriefingPolling(d.job_id, news.map(n => n.id));
     } catch (e) {
-      setBriefingError(e instanceof Error ? e.message : 'Error generando el resumen');
-    } finally {
       setBriefingLoading(false);
+      const errorMsg = e instanceof Error ? e.message : 'Error generando el resumen';
+      setBriefingError(errorMsg);
+      updateBriefingCache({ status: 'failed', error: errorMsg, newsIds: news.map(n => n.id), addedUrls: [], failedUrls: [], telegramUrls: [] });
     }
   };
 

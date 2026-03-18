@@ -142,7 +142,7 @@ async function fetchAllFinancialNews(apiKey: string): Promise<NewsItem[]> {
         url: n.link,
         source: n.publisher ?? 'Yahoo Finance',
         category: 'markets',
-        publishedAt: new Date(((n.providerPublishTime ?? 0)) * 1000).toISOString(),
+        publishedAt: new Date((Number(n.providerPublishTime) || 0) * 1000).toISOString(),
       });
     }
   } catch { /* skip */ }
@@ -161,8 +161,10 @@ async function fetchAllFinancialNews(apiKey: string): Promise<NewsItem[]> {
 }
 
 // ─── POST: generate briefing from news already loaded in the frontend ─────────
+// Supports both sync mode (default) and async mode (with ?async=1)
 
 export async function POST(request: NextRequest) {
+  const isAsync = request.nextUrl.searchParams.get('async') === '1';
   const { news } = await request.json() as { news: NewsItem[] };
 
   if (!news?.length) {
@@ -171,6 +173,23 @@ export async function POST(request: NextRequest) {
 
   const urls = news.map(n => n.url).filter(Boolean);
 
+  // Async mode: start background job and return job_id
+  if (isAsync) {
+    try {
+      const res = await fetch('http://localhost:8000/api/generate_briefing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ news_items: news, urls }),
+      });
+      if (!res.ok) throw new Error(`Backend error: ${res.status}`);
+      const data = await res.json() as { job_id: string };
+      return NextResponse.json({ job_id: data.job_id });
+    } catch (e) {
+      return NextResponse.json({ error: `No se pudo iniciar la generación: ${e}` }, { status: 503 });
+    }
+  }
+
+  // Sync mode: wait for completion (original behavior)
   try {
     const res = await fetch('http://localhost:8000/api/daily_briefing', {
       method: 'POST',
@@ -193,9 +212,36 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// ─── GET: legacy cached briefing ──────────────────────────────────────────────
+// ─── GET: poll briefing job status OR legacy cached briefing ──────────────────
 
 export async function GET(request: NextRequest) {
+  // Check if this is a job status poll
+  const jobId = request.nextUrl.searchParams.get('job_id');
+  if (jobId) {
+    try {
+      const res = await fetch(`http://localhost:8000/api/briefing_status/${jobId}`);
+      if (!res.ok) {
+        if (res.status === 404) {
+          return NextResponse.json({ error: 'Job no encontrado' }, { status: 404 });
+        }
+        throw new Error(`Backend error: ${res.status}`);
+      }
+      const data = await res.json();
+      // Transform snake_case to camelCase
+      return NextResponse.json({
+        status: data.status,
+        briefing: data.briefing,
+        addedUrls: data.added_urls,
+        failedUrls: data.failed_urls,
+        telegramUrls: data.telegram_urls,
+        error: data.error,
+      });
+    } catch (e) {
+      return NextResponse.json({ error: `No se pudo consultar el estado: ${e}` }, { status: 503 });
+    }
+  }
+
+  // Legacy: cached briefing generation
   const clientNewsKey = request.headers.get('X-News-Api-Key');
   const newsApiKey = clientNewsKey || process.env.NEWS_API_KEY || '';
   

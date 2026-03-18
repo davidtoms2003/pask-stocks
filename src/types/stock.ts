@@ -18,3 +18,30 @@ export interface StockResult {
   signal: Signal;
   explanation: string;
 }
+
+export interface FinnhubData {
+  recommendation: {
+    buy: number;
+    hold: number;
+    period: string;
+    sell: number;
+    strongBuy: number;
+    strongSell: number;
+    symbol: string;
+  } | null;
+  sentiment: {
+    buzz: {
+      articlesInLastWeek: number;
+      buzz: number;
+      weeklyAverage: number;
+    };
+    companyNewsScore: number;
+    sectorAverageBullishPercent: number;
+    sectorAverageNewsScore: number;
+    sentiment: {
+      bearishPercent: number;
+      bullishPercent: number;
+    };
+    symbol: string;
+  } | null;
+}

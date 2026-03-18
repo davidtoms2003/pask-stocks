@@ -2,7 +2,7 @@ import re
 import asyncio
 from ddgs import DDGS
 from notebooklm import NotebookLMClient
-from notebooklm_service import notebooklm_service, get_notebook_client
+from notebooklm_service import notebooklm_service
 
 # ─── Rol del analista (se establece como custom_prompt del notebook) ──────────
 # Corto a propósito: va en configure(), no en cada mensaje
@@ -404,11 +404,13 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
             # Para que el modelo pueda leerlas antes de contestar
             res = await notebooklm_service.add_news_sources(found_urls, nb_id)
             for item in res.get("added", []):
-                actions.append({
-                    "type": "source_added",
-                    "title": f"Web: {item.get('url')}",
-                    "url": item.get('url')
-                })
+                url = item.get('url')
+                if url and url != "null":
+                    actions.append({
+                        "type": "source_added",
+                        "title": f"Web: {url}",
+                        "url": url
+                    })
             
             if res.get("failed"):
                 print(f"Algunas URLs fallaron: {res['failed']}")
@@ -439,7 +441,12 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
             source_added = True
         except Exception as e:
             print(f"Error añadiendo fuente de texto: {e}")
-            # Fallback al prompt si falla, pero solo si tocaba añadirlo
+            if "Authentication expired" in str(e) or "re-authenticate" in str(e):
+                 # Don't fallback silently if auth is dead, let it fail at ask() stage or let the caller handle it?
+                 # Actually, better to raise it so the API returns 401
+                 raise e 
+            
+            # Fallback al prompt si falla por otra razón (network, etc)
             if add_stock_context and stock_context: parts.append(f"DATOS DE LA ACCIÓN:\n{stock_context}")
             if search_snippets: parts.append(f"RESUMEN BÚSQUEDA:\n{search_snippets}")
 
@@ -469,7 +476,7 @@ async def run_agent(question: str, history: list[dict], stock_context: str = "",
     try:
         # nb_id ya resuelto arriba
 
-        async with await get_notebook_client() as client:
+        async with await notebooklm_service.use_client() as client:
             from notebooklm.rpc import ChatGoal, ChatResponseLength
             await client.chat.configure(
                 nb_id,

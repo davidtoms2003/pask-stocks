@@ -2,11 +2,15 @@
   "name": "pask-stocks",
   "version": "0.1.0",
   "private": true,
+  "main": "electron-main.js",
   "scripts": {
     "dev": "next dev",
+    "dev:backend": "cd backend && python -m uvicorn app:app --reload --host 127.0.0.1 --port 8000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "electron": "electron .",
+    "electron:dev": "electron . --devtools"
   },
   "dependencies": {
     "@extractus/article-extractor": "^8.0.20",
@@ -19,6 +23,7 @@
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
+    "electron": "^41.0.3",
     "eslint": "^8",
     "eslint-config-next": "14.2.35",
     "postcss": "^8",

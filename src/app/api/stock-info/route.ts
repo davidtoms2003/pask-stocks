@@ -4,7 +4,7 @@ import { calculateMA, calculateRSI } from '@/lib/indicators';
 import { getRecommendation } from '@/lib/recommendation';
 import { PriceDay } from '@/types/stock';
 
-const yahooFinance = new YahooFinance({ suppressNotices: ['yahooSurvey'] });
+const yahooFinance = new YahooFinance({ suppressNotices: ['ripHistorical', 'yahooSurvey'] });
 
 export interface StockInfo {
   ticker: string;
@@ -35,6 +35,8 @@ export interface StockInfo {
   revenue: number | null;
   grossMargins: number | null;
   revenueGrowth: number | null;
+  ebitda: number | null;
+  netIncome: number | null;
 }
 
 export async function GET(req: NextRequest) {
@@ -53,7 +55,7 @@ export async function GET(req: NextRequest) {
     const [historical, summary] = await Promise.all([
       yahooFinance.historical(ticker, { period1: startDate, period2: endDate, interval: '1d' }),
       yahooFinance.quoteSummary(ticker, {
-        modules: ['assetProfile', 'summaryDetail', 'financialData', 'price'],
+        modules: ['assetProfile', 'summaryDetail', 'financialData', 'price', 'defaultKeyStatistics'],
       }),
     ]);
 
@@ -80,6 +82,7 @@ export async function GET(req: NextRequest) {
     const sd = summary.summaryDetail;
     const fd = summary.financialData;
     const pr = summary.price;
+    const ks = summary.defaultKeyStatistics;
 
     // Use real-time price if available, otherwise fallback to latest historical close
     const price = pr?.regularMarketPrice ?? latest.close;
@@ -120,6 +123,8 @@ export async function GET(req: NextRequest) {
       revenue: fd?.totalRevenue ?? null,
       grossMargins: fd?.grossMargins ?? null,
       revenueGrowth: fd?.revenueGrowth ?? null,
+      ebitda: fd?.ebitda ?? null,
+      netIncome: ks?.netIncomeToCommon ?? ((fd?.totalRevenue && fd?.profitMargins) ? fd.totalRevenue * fd.profitMargins : null),
     };
 
     return NextResponse.json(info);
