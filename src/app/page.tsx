@@ -169,9 +169,9 @@ export default function Home() {
   const [tab, setTab] = useState<Tab>('analyze');
 
   return (
-    <main className="min-h-screen bg-gray-950 text-white">
+    <main className="min-h-screen bg-[#FAFAFA] text-[#1E293B]">
       {/* Header */}
-      <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur sticky top-0 z-10">
+      <header className="border-b border-gray-200/60 bg-white/95 backdrop-blur sticky top-0 z-10 shadow-sm">
         <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-3">
           <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-black text-sm select-none">P</div>
           <span className="font-bold text-base tracking-tight">PASK STOCKS</span>
@@ -180,14 +180,14 @@ export default function Home() {
               <button
                 key={t}
                 onClick={() => setTab(t)}
-                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'}`}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${tab === t ? 'bg-blue-600 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'}`}
               >
                 {TAB_LABELS[t]}
               </button>
             ))}
             <Link
               href="/docs"
-              className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors"
+              className="px-4 py-1.5 rounded-lg text-sm font-medium text-gray-400 hover:bg-gray-800 hover:text-white transition-colors"
             >
               Docs
             </Link>
@@ -198,7 +198,7 @@ export default function Home() {
       {tab === 'analyze' ? <AnalyzeTab /> : tab === 'chat' ? <ChatTab /> : <NewsTab />}
 
       <footer className="text-center text-gray-700 text-xs py-8">
-        Datos simulados (mock) · Solo educativo · No es asesoramiento financiero
+        Solo educativo · No es asesoramiento financiero
       </footer>
     </main>
   );
@@ -408,64 +408,125 @@ function AnalyzeTab() {
           </div>
 
           {/* Finnhub Data - Market Intelligence */}
-          {finnhubData && (finnhubData.recommendation || (finnhubData.sentiment && finnhubData.sentiment.sentiment)) && (
+          {finnhubData && (finnhubData.recommendation || (finnhubData.sentiment && finnhubData.sentiment.sentiment) || finnhubData.priceTarget || finnhubData.basicFinancials) && (
             <div className="bg-gray-900 border border-gray-800 rounded-2xl p-5">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Analyst Recommendations */}
-                {finnhubData.recommendation && (
-                  <div>
-                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Recomendaciones de Analistas</p>
-                    <div className="grid grid-cols-3 gap-3 mb-3">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-emerald-400">{finnhubData.recommendation.strongBuy + finnhubData.recommendation.buy}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">Compra</div>
+              <div className="grid gap-6 grid-cols-1">
+                {/* Row 1: Recommendations and Sentiment */}
+                <div className={`grid gap-6 ${finnhubData.recommendation && finnhubData.sentiment?.sentiment ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'}`}>
+                  {/* Analyst Recommendations */}
+                  {finnhubData.recommendation && (
+                    <div className="flex flex-col">
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Recomendaciones de Analistas</p>
+                      <div className="grid grid-cols-3 gap-3 mb-3">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-emerald-400">{finnhubData.recommendation.strongBuy + finnhubData.recommendation.buy}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Compra</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-amber-400">{finnhubData.recommendation.hold}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Mantener</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-400">{finnhubData.recommendation.strongSell + finnhubData.recommendation.sell}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Venta</div>
+                        </div>
                       </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-amber-400">{finnhubData.recommendation.hold}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">Mantener</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-red-400">{finnhubData.recommendation.strongSell + finnhubData.recommendation.sell}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">Venta</div>
+                      <div className="flex gap-1 h-2 rounded-full overflow-hidden bg-gray-800 mt-auto">
+                        <div 
+                          className="bg-emerald-500"
+                          style={{ width: `${((finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                        />
+                        <div 
+                          className="bg-amber-500"
+                          style={{ width: `${(finnhubData.recommendation.hold / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                        />
+                        <div 
+                          className="bg-red-500"
+                          style={{ width: `${((finnhubData.recommendation.sell + finnhubData.recommendation.strongSell) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
+                        />
                       </div>
                     </div>
-                    <div className="flex gap-1 h-2 rounded-full overflow-hidden bg-gray-800">
-                      <div 
-                        className="bg-emerald-500"
-                        style={{ width: `${((finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
-                      />
-                      <div 
-                        className="bg-amber-500"
-                        style={{ width: `${(finnhubData.recommendation.hold / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
-                      />
-                      <div 
-                        className="bg-red-500"
-                        style={{ width: `${((finnhubData.recommendation.sell + finnhubData.recommendation.strongSell) / (finnhubData.recommendation.buy + finnhubData.recommendation.strongBuy + finnhubData.recommendation.hold + finnhubData.recommendation.sell + finnhubData.recommendation.strongSell)) * 100}%` }}
-                      />
+                  )}
+
+                  {/* News Sentiment & Market Metrics */}
+                  {finnhubData.sentiment && finnhubData.sentiment.sentiment && (
+                    <div className={`flex flex-col ${!finnhubData.recommendation ? 'items-center' : ''}`}>
+                      <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Sentimiento de Mercado</p>
+                      <div className={`grid grid-cols-4 gap-3 ${!finnhubData.recommendation ? 'max-w-md' : ''}`}>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-emerald-400">{(finnhubData.sentiment.sentiment.bullishPercent * 100).toFixed(0)}%</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Bullish</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-400">{(finnhubData.sentiment.sentiment.bearishPercent * 100).toFixed(0)}%</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Bearish</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-400">{finnhubData.sentiment.buzz?.articlesInLastWeek ?? 0}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">Artículos</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-purple-400">{finnhubData.sentiment.companyNewsScore?.toFixed(1) ?? 'N/A'}</div>
+                          <div className="text-xs text-gray-500 mt-0.5">News Score</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Row 2: Price Target */}
+                {finnhubData.priceTarget && (
+                  <div className="border-t border-gray-800 pt-5">
+                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Precio Objetivo de Analistas</p>
+                    <div className="grid grid-cols-4 gap-3">
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-emerald-400">${finnhubData.priceTarget.targetHigh?.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Máximo</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-blue-400">${finnhubData.priceTarget.targetMean?.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Media</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-purple-400">${finnhubData.priceTarget.targetMedian?.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Mediana</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-2xl font-bold text-red-400">${finnhubData.priceTarget.targetLow?.toFixed(2)}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Mínimo</div>
+                      </div>
                     </div>
                   </div>
                 )}
 
-                {/* News Sentiment & Market Metrics */}
-                {finnhubData.sentiment && finnhubData.sentiment.sentiment && (
-                  <div>
-                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Sentimiento de Mercado</p>
-                    <div className="grid grid-cols-4 gap-3">
+                {/* Row 3: Basic Financials */}
+                {finnhubData.basicFinancials && (
+                  <div className="border-t border-gray-800 pt-5">
+                    <p className="text-gray-500 text-xs font-medium uppercase tracking-wider mb-3">Métricas Financieras Clave</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
                       <div className="text-center">
-                        <div className="text-2xl font-bold text-emerald-400">{(finnhubData.sentiment.sentiment.bullishPercent * 100).toFixed(0)}%</div>
-                        <div className="text-xs text-gray-500 mt-0.5">Bullish</div>
+                        <div className="text-xl font-bold text-blue-400">{finnhubData.basicFinancials.peBasicExclExtraTTM?.toFixed(2) ?? 'N/A'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">P/E Ratio</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-2xl font-bold text-red-400">{(finnhubData.sentiment.sentiment.bearishPercent * 100).toFixed(0)}%</div>
-                        <div className="text-xs text-gray-500 mt-0.5">Bearish</div>
+                        <div className="text-xl font-bold text-purple-400">${finnhubData.basicFinancials.epsBasicExclExtraItemsTTM?.toFixed(2) ?? 'N/A'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">EPS (TTM)</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-400">{finnhubData.sentiment.buzz?.articlesInLastWeek ?? 0}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">Artículos</div>
+                        <div className="text-xl font-bold text-emerald-400">${finnhubData.basicFinancials['52WeekHigh']?.toFixed(2) ?? 'N/A'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">52W High</div>
                       </div>
                       <div className="text-center">
-                        <div className="text-2xl font-bold text-purple-400">{finnhubData.sentiment.companyNewsScore?.toFixed(1) ?? 'N/A'}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">News Score</div>
+                        <div className="text-xl font-bold text-red-400">${finnhubData.basicFinancials['52WeekLow']?.toFixed(2) ?? 'N/A'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">52W Low</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-xl font-bold text-amber-400">{finnhubData.basicFinancials.beta?.toFixed(2) ?? 'N/A'}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Beta</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="text-xl font-bold text-cyan-400">{(finnhubData.basicFinancials.dividendYieldIndicatedAnnual * 100)?.toFixed(2) ?? 'N/A'}%</div>
+                        <div className="text-xs text-gray-500 mt-0.5">Div Yield</div>
                       </div>
                     </div>
                   </div>
@@ -1524,8 +1585,24 @@ function NewsTab() {
       const d = await res.json();
       if (!res.ok || d.error) throw new Error(d.error ?? 'Error desconocido');
       
-      // Iniciar polling en background - persiste aunque cambies de página
-      startBriefingPolling(d.job_id, news.map(n => n.id));
+      // Si el backend devuelve el briefing directamente, usarlo
+      if (d.briefing) {
+        setBriefing(d.briefing);
+        setBriefingLoading(false);
+        saveBriefingCache({
+          status: 'ready',
+          briefing: d.briefing,
+          newsIds: news.map(n => n.id),
+          addedUrls: d.addedUrls ?? [],
+          failedUrls: d.failedUrls ?? [],
+          telegramUrls: d.telegramUrls ?? [],
+        });
+      } else if (d.job_id && d.job_id !== 'sync') {
+        // Solo iniciar polling si hay un job_id real
+        startBriefingPolling(d.job_id, news.map(n => n.id));
+      } else {
+        throw new Error('Respuesta inesperada del servidor');
+      }
     } catch (e) {
       setBriefingLoading(false);
       const errorMsg = e instanceof Error ? e.message : 'Error generando el resumen';

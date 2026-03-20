@@ -36,9 +36,31 @@ export async function POST(request: NextRequest) {
 - Artículos en la última semana: ${buzz?.articlesInLastWeek ?? 0}
 - Buzz de noticias: ${buzz ? (buzz.buzz > 1 ? 'Alto' : 'Normal') : 'N/A'}`;
     }
+
+    if (finnhubData.priceTarget) {
+      const pt = finnhubData.priceTarget;
+      finnhubContext += `\n\nPrecios Objetivo de Analistas:
+- Precio objetivo máximo: $${pt.targetHigh?.toFixed(2) ?? 'N/A'}
+- Precio objetivo medio: $${pt.targetMean?.toFixed(2) ?? 'N/A'}
+- Precio objetivo mediano: $${pt.targetMedian?.toFixed(2) ?? 'N/A'}
+- Precio objetivo mínimo: $${pt.targetLow?.toFixed(2) ?? 'N/A'}`;
+    }
+
+    if (finnhubData.basicFinancials) {
+      const bf = finnhubData.basicFinancials;
+      finnhubContext += `\n\nMétricas Financieras Fundamentales:
+- P/E Ratio (TTM): ${bf.peBasicExclExtraTTM?.toFixed(2) ?? 'N/A'}
+- EPS (TTM): $${bf.epsBasicExclExtraItemsTTM?.toFixed(2) ?? 'N/A'}
+- Máximo 52 semanas: $${bf['52WeekHigh']?.toFixed(2) ?? 'N/A'}
+- Mínimo 52 semanas: $${bf['52WeekLow']?.toFixed(2) ?? 'N/A'}
+- Beta: ${bf.beta?.toFixed(2) ?? 'N/A'}
+- Dividend Yield: ${bf.dividendYieldIndicatedAnnual ? (bf.dividendYieldIndicatedAnnual * 100).toFixed(2) + '%' : 'N/A'}
+- ROE (TTM): ${bf.roeTTM ? bf.roeTTM.toFixed(2) + '%' : 'N/A'}
+- Price to Book: ${bf.priceToBookMRQ?.toFixed(2) ?? 'N/A'}`;
+    }
   }
 
-  const prompt = `Eres un analista financiero experto en análisis técnico. Analiza los siguientes datos de la acción ${ticker} y emite una recomendación.
+  const prompt = `Eres un analista financiero experto en análisis técnico y fundamental. Analiza los siguientes datos de la acción ${ticker} y emite una recomendación.
 
 Datos técnicos:
 - Precio actual: $${price.toFixed(2)}
@@ -49,11 +71,11 @@ Datos técnicos:
 - RSI 14 periodos: ${rsi.toFixed(1)}${finnhubContext}
 
 Responde ÚNICAMENTE con un objeto JSON válido, sin texto adicional antes ni después, con este formato exacto:
-{"signal":"BUY","explanation":"texto de 2-3 frases en español explicando la decisión, considerando TODOS los datos técnicos y de mercado proporcionados"}
+{"signal":"BUY","explanation":"texto de 3-4 frases en español explicando la decisión, mencionando específicamente los datos técnicos, precios objetivo, métricas financieras y recomendaciones de analistas cuando estén disponibles"}
 
 El campo signal debe ser exactamente BUY, SELL o HOLD.
-BUY si el contexto técnico es alcista. SELL si es bajista. HOLD si no hay señal clara.
-IMPORTANTE: Considera las recomendaciones de analistas y el sentimiento de mercado en tu análisis.`;
+BUY si el contexto técnico y fundamental es alcista. SELL si es bajista. HOLD si no hay señal clara.
+IMPORTANTE: Integra en tu explicación las recomendaciones de analistas, precios objetivo, y métricas fundamentales como P/E, EPS y beta si están disponibles.`;
 
   try {
     const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {

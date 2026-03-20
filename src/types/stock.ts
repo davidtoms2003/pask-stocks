@@ -44,4 +44,43 @@ export interface FinnhubData {
     };
     symbol: string;
   } | null;
+  priceTarget: {
+    lastUpdated: string;
+    symbol: string;
+    targetHigh: number;
+    targetLow: number;
+    targetMean: number;
+    targetMedian: number;
+  } | null;
+  basicFinancials: {
+    '10DayAverageTradingVolume': number;
+    '52WeekHigh': number;
+    '52WeekLow': number;
+    '52WeekPriceReturnDaily': number;
+    beta: number;
+    peBasicExclExtraTTM: number;
+    peExclExtraTTM: number;
+    epsBasicExclExtraItemsTTM: number;
+    epsExclExtraItemsTTM: number;
+    marketCapitalization: number;
+    dividendYieldIndicatedAnnual: number;
+    priceToBookMRQ: number;
+    roeTTM: number;
+    revenuePerShareTTM: number;
+  } | null;
+  profile: {
+    country: string;
+    currency: string;
+    exchange: string;
+    finnhubIndustry: string;
+    ipo: string;
+    logo: string;
+    marketCapitalization: number;
+    name: string;
+    phone: string;
+    shareOutstanding: number;
+    ticker: string;
+    weburl: string;
+  } | null;
+  peers: string[] | null;
 }

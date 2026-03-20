@@ -176,14 +176,26 @@ export async function POST(request: NextRequest) {
   // Async mode: start background job and return job_id
   if (isAsync) {
     try {
-      const res = await fetch('http://localhost:8000/api/generate_briefing', {
+      const res = await fetch('http://localhost:8000/api/daily_briefing', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ news_items: news, urls }),
       });
       if (!res.ok) throw new Error(`Backend error: ${res.status}`);
-      const data = await res.json() as { job_id: string };
-      return NextResponse.json({ job_id: data.job_id });
+      const data = await res.json() as { briefing?: string; added_urls?: string[]; failed_urls?: string[]; telegram_urls?: string[]; job_id?: string };
+      
+      // El endpoint actual devuelve el briefing directamente, no un job_id
+      // Lo tratamos como si fuera síncrono pero retornamos en formato que espera el frontend
+      if (data.briefing) {
+        return NextResponse.json({
+          briefing: data.briefing,
+          addedUrls: data.added_urls ?? [],
+          failedUrls: data.failed_urls ?? [],
+          telegramUrls: data.telegram_urls ?? [],
+        });
+      }
+      
+      return NextResponse.json({ job_id: data.job_id ?? 'sync' });
     } catch (e) {
       return NextResponse.json({ error: `No se pudo iniciar la generación: ${e}` }, { status: 503 });
     }
